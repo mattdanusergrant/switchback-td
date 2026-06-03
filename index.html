@@ -252,31 +252,52 @@ const CREEPS = {
 
 const BOSS_NAMES = ['Vorlak the Unending', 'Mournwight', 'Thresh-Iron Warden', 'Cinderwidow', 'Pale Margrave', 'The Long Knell'];
 
-const TUTORIAL_WAVES = 10;
-// Hand-tuned tutorial waves 1-9. Wave 10 is the boss override.
-// Counts and HP designed so a player can survive each wave with a sensible starting build.
+const TUTORIAL_WAVES = 20;
+// Hand-tuned tutorial waves. Boss waves (10, 20) are handled by the boss override.
+// Goal: standards-only for the first 6, fast at 7, armored at 11, swarm at 14 — slow ramp.
 const TUTORIAL_WAVE_SPECS = [
-  { count: 2,  hpMul: 0.5, delay: 0.9, pool: ['standard'] },                        // 1
-  { count: 3,  hpMul: 0.7, delay: 0.8, pool: ['standard'] },                        // 2
-  { count: 4,  hpMul: 0.9, delay: 0.7, pool: ['standard'] },                        // 3
-  { count: 5,  hpMul: 1.1, delay: 0.6, pool: ['standard', 'fast'] },                // 4
-  { count: 6,  hpMul: 1.3, delay: 0.55,pool: ['standard', 'fast'] },                // 5
-  { count: 7,  hpMul: 1.5, delay: 0.5, pool: ['standard', 'fast', 'armored'] },     // 6
-  { count: 8,  hpMul: 1.7, delay: 0.5, pool: ['standard', 'fast', 'armored'] },     // 7
-  { count: 10, hpMul: 1.9, delay: 0.45,pool: ['standard', 'fast', 'armored', 'swarm'] }, // 8
-  { count: 12, hpMul: 2.1, delay: 0.4, pool: ['standard', 'fast', 'armored', 'swarm'] }, // 9
+  /*  1 */ { count: 2,  hpMul: 0.5, delay: 0.9,  pool: ['standard'] },
+  /*  2 */ { count: 3,  hpMul: 0.7, delay: 0.8,  pool: ['standard'] },
+  /*  3 */ { count: 4,  hpMul: 0.85,delay: 0.75, pool: ['standard'] },
+  /*  4 */ { count: 5,  hpMul: 1.0, delay: 0.7,  pool: ['standard'] },
+  /*  5 */ { count: 6,  hpMul: 1.2, delay: 0.65, pool: ['standard'] },
+  /*  6 */ { count: 5,  hpMul: 1.4, delay: 0.6,  pool: ['standard'] },
+  /*  7 */ { count: 6,  hpMul: 1.5, delay: 0.55, pool: ['standard', 'fast'] },
+  /*  8 */ { count: 7,  hpMul: 1.6, delay: 0.5,  pool: ['standard', 'fast'] },
+  /*  9 */ { count: 8,  hpMul: 1.7, delay: 0.5,  pool: ['standard', 'fast'] },
+  /* 10 */ null,
+  /* 11 */ { count: 7,  hpMul: 1.9, delay: 0.5,  pool: ['standard', 'fast', 'armored'] },
+  /* 12 */ { count: 8,  hpMul: 2.0, delay: 0.5,  pool: ['standard', 'fast', 'armored'] },
+  /* 13 */ { count: 9,  hpMul: 2.2, delay: 0.45, pool: ['standard', 'fast', 'armored'] },
+  /* 14 */ { count: 11, hpMul: 2.3, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
+  /* 15 */ { count: 13, hpMul: 2.5, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
+  /* 16 */ { count: 15, hpMul: 2.7, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
+  /* 17 */ { count: 17, hpMul: 2.9, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
+  /* 18 */ { count: 19, hpMul: 3.1, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
+  /* 19 */ { count: 22, hpMul: 3.3, delay: 0.38, pool: ['standard', 'fast', 'armored', 'swarm'] },
+  /* 20 */ null,
 ];
 const TUTORIAL_TIPS = [
   'Wave 1 — You have 250g (5 Bolts). Tap an empty tile next to the path to build one. Only 2 weak creeps this wave.',
-  'Wave 2 — Add a second Bolt. Towers also block tiles — placed cleverly they force creeps to walk further.',
-  'Wave 3 — Try placing towers in a row, leaving one gap. The path is forced to bend through the gap.',
-  'Wave 4 — Fast creeps appear. Each bend stretches the path; watch LENGTH rise and boost your damage.',
-  'Wave 5 — Try a zigzag layout. The map expands after this wave — more room for a deeper maze.',
-  'Wave 6 — Splash hits groups. Frost slows. Pick a tower that fits your maze\'s choke point.',
-  'Wave 7 — Tap any placed tower to see its two upgrade paths and current stats.',
-  'Wave 8 — Upgrade a tower. Each branch unlocks new powers (burn, execute, bounces, AoE).',
-  'Wave 9 — Stack length: every extra path tile = more damage. Sell and rebuild if needed.',
-  'Wave 10 — Boss wave. Bosses leak 5 lives — keep them in range as long as your maze allows.',
+  'Wave 2 — Add a second Bolt. Place it on the OPPOSITE side so both sides of the path cover creeps.',
+  'Wave 3 — A third Bolt buys safety. Try placing it further down the path for staggered fire.',
+  'Wave 4 — Now try BLOCKING a tile. Towers placed in the path force creeps to walk around.',
+  'Wave 5 — Try a zigzag layout: alternate gaps left and right so the path winds. Map grows after this wave!',
+  'Wave 6 — Watch the LENGTH bonus rise as your maze gets longer. That % boosts every tower\'s damage.',
+  'Wave 7 — Fast creeps now! Yellow + quick. A Frost tower (slow) softens them.',
+  'Wave 8 — Splash hits groups. Useful when creeps clump up.',
+  'Wave 9 — Tap any placed tower to see its stats and two upgrade paths.',
+  'Wave 10 — Boss wave! Bosses leak 5 lives. Make sure damage is stacked along your longest path.',
+  'Wave 11 — Armored creeps now (grey, slow). They take 50% less damage. Big-hit towers beat them best.',
+  'Wave 12 — Try the Sharpshooter Bolt upgrade — slow but huge per-shot damage, ignores small HP.',
+  'Wave 13 — Or upgrade Frost to Glacier: 80% slow keeps armored stalled in your fire lanes.',
+  'Wave 14 — Swarm creeps now (pink, tiny). Many low-HP units. Splash and Chain shine here.',
+  'Wave 15 — Try Chain → Conductor: lightning bounces between many creeps with low falloff.',
+  'Wave 16 — Mortar (Splash A) deletes groups. Combine with Frost for stationary kill zones.',
+  'Wave 17 — Stack your maze hard. Sell + rebuild if a layout isn\'t earning enough length bonus.',
+  'Wave 18 — Deadeye (Sharpshooter T3) executes any non-boss creep below 18% HP. Endgame finisher.',
+  'Wave 19 — Last tutorial wave before the boss. Normal scaling kicks in after wave 20.',
+  'Wave 20 — Final tutorial boss. Heavier than wave 10. Show what your maze can do.',
 ];
 
 // === STATE ===
