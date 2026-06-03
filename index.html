@@ -166,8 +166,8 @@ const DEFAULT_BAL = {
   creepSpeedMul: 1.0,
   projectileSpeedMul: 1.0,
   tutorialEnabled: 1,
-  tutorialHpScale: 0.55,
-  tutorialCountScale: 0.6,
+  tutorialHpScale: 1.0,
+  tutorialCountScale: 1.0,
 };
 let BAL = { ...DEFAULT_BAL };
 try {
@@ -253,12 +253,25 @@ const CREEPS = {
 const BOSS_NAMES = ['Vorlak the Unending', 'Mournwight', 'Thresh-Iron Warden', 'Cinderwidow', 'Pale Margrave', 'The Long Knell'];
 
 const TUTORIAL_WAVES = 10;
+// Hand-tuned tutorial waves 1-9. Wave 10 is the boss override.
+// Counts and HP designed so a player can survive each wave with a sensible starting build.
+const TUTORIAL_WAVE_SPECS = [
+  { count: 2,  hpMul: 0.5, delay: 0.9, pool: ['standard'] },                        // 1
+  { count: 3,  hpMul: 0.7, delay: 0.8, pool: ['standard'] },                        // 2
+  { count: 4,  hpMul: 0.9, delay: 0.7, pool: ['standard'] },                        // 3
+  { count: 5,  hpMul: 1.1, delay: 0.6, pool: ['standard', 'fast'] },                // 4
+  { count: 6,  hpMul: 1.3, delay: 0.55,pool: ['standard', 'fast'] },                // 5
+  { count: 7,  hpMul: 1.5, delay: 0.5, pool: ['standard', 'fast', 'armored'] },     // 6
+  { count: 8,  hpMul: 1.7, delay: 0.5, pool: ['standard', 'fast', 'armored'] },     // 7
+  { count: 10, hpMul: 1.9, delay: 0.45,pool: ['standard', 'fast', 'armored', 'swarm'] }, // 8
+  { count: 12, hpMul: 2.1, delay: 0.4, pool: ['standard', 'fast', 'armored', 'swarm'] }, // 9
+];
 const TUTORIAL_TIPS = [
-  'Wave 1 — Tap an empty tile to build a Bolt tower. Creeps walk from IN to OUT.',
-  'Wave 2 — Place a second tower. Towers block tiles — creeps must walk around.',
-  'Wave 3 — Place towers in a row, leaving a gap. Force the path to bend through the gap.',
-  'Wave 4 — Each bend stretches the path. Watch the LENGTH stat — that bonus boosts every tower\'s damage.',
-  'Wave 5 — Try a zigzag layout. Map will expand after this wave, giving you more room.',
+  'Wave 1 — You have 250g (5 Bolts). Tap an empty tile next to the path to build one. Only 2 weak creeps this wave.',
+  'Wave 2 — Add a second Bolt. Towers also block tiles — placed cleverly they force creeps to walk further.',
+  'Wave 3 — Try placing towers in a row, leaving one gap. The path is forced to bend through the gap.',
+  'Wave 4 — Fast creeps appear. Each bend stretches the path; watch LENGTH rise and boost your damage.',
+  'Wave 5 — Try a zigzag layout. The map expands after this wave — more room for a deeper maze.',
   'Wave 6 — Splash hits groups. Frost slows. Pick a tower that fits your maze\'s choke point.',
   'Wave 7 — Tap any placed tower to see its two upgrade paths and current stats.',
   'Wave 8 — Upgrade a tower. Each branch unlocks new powers (burn, execute, bounces, AoE).',
@@ -417,21 +430,31 @@ function applyUpgrade(t, opt) {
 function makeWave(n) {
   const q = [];
   const tut = BAL.tutorialEnabled && n <= TUTORIAL_WAVES;
-  const hpScaleMul = tut ? BAL.tutorialHpScale : 1;
   if (n % 10 === 0) {
     state.bossName = BOSS_NAMES[Math.floor(Math.random()*BOSS_NAMES.length)];
-    q.push({ type:'boss', delay:0.5, hpMul: 1 + n*BAL.bossHpScale * hpScaleMul, bountyMul: 1 + (n/10) });
-    const entourage = tut ? 3 : 6;
-    for (let i = 0; i < entourage; i++) q.push({ type:'standard', delay:0.6, hpMul: 1 + n*BAL.waveHpScale * 0.75 * hpScaleMul });
+    const bossHp = tut ? (1 + n*BAL.bossHpScale * BAL.tutorialHpScale * 0.5) : (1 + n*BAL.bossHpScale);
+    q.push({ type:'boss', delay:0.5, hpMul: bossHp, bountyMul: 1 + (n/10) });
+    const entourage = tut ? 2 : 6;
+    const entHp = tut ? 1.0 : (1 + n*BAL.waveHpScale * 0.75);
+    for (let i = 0; i < entourage; i++) q.push({ type:'standard', delay:0.6, hpMul: entHp });
     return q;
   }
-  const rawCount = BAL.waveCountBase + n * BAL.waveCountPerWave;
-  const count = Math.max(3, Math.round(rawCount * (tut ? BAL.tutorialCountScale : 1)));
+  if (tut && n <= TUTORIAL_WAVE_SPECS.length) {
+    const spec = TUTORIAL_WAVE_SPECS[n - 1];
+    const count = Math.max(1, Math.round(spec.count * BAL.tutorialCountScale));
+    const hpMul = spec.hpMul * BAL.tutorialHpScale;
+    for (let i = 0; i < count; i++) {
+      const t = spec.pool[Math.floor(Math.random() * spec.pool.length)];
+      q.push({ type: t, delay: t === 'swarm' ? 0.18 : spec.delay, hpMul });
+    }
+    return q;
+  }
+  const count = BAL.waveCountBase + n * BAL.waveCountPerWave;
   const pool = ['standard'];
   if (n >= 3) pool.push('fast');
   if (n >= 4) pool.push('armored');
   if (n >= 5) pool.push('swarm','swarm');
-  const hpMul = 1 + n * BAL.waveHpScale * hpScaleMul;
+  const hpMul = 1 + n * BAL.waveHpScale;
   for (let i = 0; i < count; i++) {
     const t = pool[Math.floor(Math.random()*pool.length)];
     q.push({ type: t, delay: t === 'swarm' ? 0.18 : 0.5, hpMul });
