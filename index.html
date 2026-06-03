@@ -31,7 +31,8 @@
   .tower-btn .name { font-weight: 700; font-size: 13px; }
   .tower-btn .cost { color: #ffd47a; font-size: 11px; margin-top: 2px; }
   .tower-btn.poor .cost { color: #6a7290; }
-  #actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  #actions { display: grid; grid-template-columns: 1fr 0.6fr 1.4fr; gap: 6px; }
+  #speed-btn { background: #2a4870; font-variant-numeric: tabular-nums; }
   #tower-info { background: #11141c; border: 1px solid #2a3045; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; }
   #tower-info.hidden { display: none; }
   #ti-name { font-weight: 700; color: #7ee0ff; font-size: 13px; margin-bottom: 2px; }
@@ -131,6 +132,7 @@
     </div>
     <div id="actions">
       <button class="action-btn" id="sell-btn" disabled>Sell</button>
+      <button class="action-btn" id="speed-btn">2×</button>
       <button class="action-btn primary" id="wave-btn">Start Wave</button>
     </div>
     <div id="msg"></div>
@@ -264,7 +266,16 @@ function newState() {
     spawnTimer: 0,
     waveActive: false,
     bossName: '',
+    gameTime: 0,
+    speedMul: 2,
   };
+}
+
+const SPEED_OPTIONS = [1, 2, 4, 8, 16];
+function cycleSpeed() {
+  const i = SPEED_OPTIONS.indexOf(state.speedMul);
+  state.speedMul = SPEED_OPTIONS[(i + 1) % SPEED_OPTIONS.length];
+  syncHUD();
 }
 
 // === PATHFINDING ===
@@ -463,7 +474,7 @@ function damageCreep(cr, dmg) {
 }
 
 function applySlow(cr, slow, dur) {
-  const now = performance.now()/1000;
+  const now = state.gameTime;
   if (slow > cr.slow || now > cr.slowUntil) cr.slow = slow;
   cr.slowUntil = now + dur;
 }
@@ -481,7 +492,7 @@ function update(dt) {
   }
 
   // creep motion + burn DoT
-  const now = performance.now()/1000;
+  const now = state.gameTime;
   for (const cr of state.creeps) {
     if (cr.dead) continue;
     if (cr.hitFlash > 0) cr.hitFlash -= dt;
@@ -569,7 +580,7 @@ function update(dt) {
           if (cr.dead) continue;
           if (Math.hypot(cr.x - p.tx, cr.y - p.ty) <= p.def.splash) {
             damageCreep(cr, dmg);
-            if (p.def.burn) { cr.burn = Math.max(cr.burn, p.def.burn); cr.burnUntil = (performance.now()/1000) + p.def.burnDur; }
+            if (p.def.burn) { cr.burn = Math.max(cr.burn, p.def.burn); cr.burnUntil = state.gameTime + p.def.burnDur; }
             if (p.def.slow) applySlow(cr, p.def.slow, p.def.slowDur);
           }
         }
@@ -793,6 +804,7 @@ function syncHUD() {
   const wb = document.getElementById('wave-btn');
   wb.textContent = state.waveActive ? 'Wave running…' : 'Start Wave';
   wb.disabled = state.waveActive;
+  document.getElementById('speed-btn').textContent = state.speedMul + '×';
   refreshTowerInfo(sel);
 }
 
@@ -969,6 +981,7 @@ window.addEventListener('DOMContentLoaded', () => {
   cv.addEventListener('pointerleave', () => { hoverCell = null; });
   document.getElementById('sell-btn').onclick = sellSelected;
   document.getElementById('wave-btn').onclick = startWave;
+  document.getElementById('speed-btn').onclick = cycleSpeed;
   document.getElementById('ov-btn').onclick = startGame;
   document.getElementById('design-toggle').onclick = () => {
     document.getElementById('design-panel').classList.toggle('show');
@@ -982,7 +995,14 @@ window.addEventListener('DOMContentLoaded', () => {
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    if (state.phase === 'PLAYING') update(dt);
+    if (state.phase === 'PLAYING') {
+      const steps = state.speedMul || 1;
+      for (let i = 0; i < steps; i++) {
+        state.gameTime += dt;
+        update(dt);
+        if (state.phase !== 'PLAYING') break;
+      }
+    }
     draw();
     requestAnimationFrame(loop);
   }
