@@ -31,7 +31,20 @@
   .tower-btn .name { font-weight: 700; font-size: 13px; }
   .tower-btn .cost { color: #ffd47a; font-size: 11px; margin-top: 2px; }
   .tower-btn.poor .cost { color: #6a7290; }
-  #actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  #actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  #tower-info { background: #11141c; border: 1px solid #2a3045; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; }
+  #tower-info.hidden { display: none; }
+  #ti-name { font-weight: 700; color: #7ee0ff; font-size: 13px; margin-bottom: 2px; }
+  #ti-stats { font-size: 11px; color: #aab; margin-bottom: 6px; }
+  #ti-upgrades { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .upg-btn { background: #1f2940; border: 1px solid #2a5a8a; color: #e6ebff; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; text-align: left; font-family: inherit; }
+  .upg-btn.A { border-color: #c8a44e; }
+  .upg-btn.B { border-color: #c84e9c; }
+  .upg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .upg-btn .label { font-weight: 700; font-size: 12px; }
+  .upg-btn .branch { color: #aab; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .upg-btn .cost { color: #ffd47a; font-size: 11px; margin-top: 2px; }
+  .ti-maxed { grid-column: 1/-1; color: #6a7290; font-size: 11px; text-align: center; padding: 6px 0; }
   .action-btn { background: #2a3045; border: none; color: #e6ebff; padding: 12px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 700; }
   .action-btn.primary { background: #2b6f4a; }
   .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -106,14 +119,18 @@
       <p id="ov-desc">Place towers to wind the path the creeps walk. Longer maze = more damage. Hold them off — wave by wave.</p>
       <div class="stats" id="ov-stats"></div>
       <button id="ov-btn">Start</button>
-      <div class="tip">Tap an empty tile to build. Tap a tower to select for sell or merge. Place towers <b>between waves</b>.</div>
+      <div class="tip">Tap an empty tile to build. Tap a tower to sell or upgrade. Each tower has two upgrade paths — Sharpshooter / Repeater, Mortar / Incendiary, Glacier / Hailstorm, Conductor / Surge.</div>
     </div>
   </div>
   <div id="bottombar">
     <div id="towers"></div>
+    <div id="tower-info" class="hidden">
+      <div id="ti-name">—</div>
+      <div id="ti-stats">—</div>
+      <div id="ti-upgrades"></div>
+    </div>
     <div id="actions">
       <button class="action-btn" id="sell-btn" disabled>Sell</button>
-      <button class="action-btn" id="merge-btn" disabled>Merge ×3</button>
       <button class="action-btn primary" id="wave-btn">Start Wave</button>
     </div>
     <div id="msg"></div>
@@ -153,16 +170,63 @@ const EXIT  = { c: Math.floor(BAL.startCols / 2), r: ROWS - 1 };
 const BASELINE_PATH = ROWS - 1;
 
 const TOWERS = {
-  bolt:   { name:'Bolt',   cost:50,  dmg:8,  range:3.3, rate:1.0, color:'#7ee0ff', proj:'#dffaff', tier:1 },
-  splash: { name:'Splash', cost:100, dmg:6,  range:3.0, rate:0.7, color:'#ffae55', proj:'#ffae55', splash:1.4, tier:1 },
-  frost:  { name:'Frost',  cost:80,  dmg:2,  range:2.8, rate:1.0, color:'#aaddff', proj:'#aaddff', slow:0.45, slowDur:1.6, tier:1 },
-  chain:  { name:'Chain',  cost:90,  dmg:9,  range:3.2, rate:0.9, color:'#c89bff', proj:'#e8ccff', bounces:2, chainRange:2.6, chainFalloff:0.7, tier:1 },
+  bolt:   { name:'Bolt',   cost:50,  dmg:8,  range:3.3, rate:1.0, color:'#7ee0ff', proj:'#dffaff' },
+  splash: { name:'Splash', cost:100, dmg:6,  range:3.0, rate:0.7, color:'#ffae55', proj:'#ffae55', splash:1.4 },
+  frost:  { name:'Frost',  cost:80,  dmg:2,  range:2.8, rate:1.0, color:'#aaddff', proj:'#aaddff', slow:0.45, slowDur:1.6 },
+  chain:  { name:'Chain',  cost:90,  dmg:9,  range:3.2, rate:0.9, color:'#c89bff', proj:'#e8ccff', bounces:2, chainRange:2.6, chainFalloff:0.7 },
 };
-const TOWERS_T2 = {
-  bolt:   { name:'Bolt II',   dmg:26, range:4.0, rate:1.2, color:'#bff5ff', proj:'#ffffff', tier:2 },
-  splash: { name:'Splash II', dmg:14, range:3.4, rate:0.9, color:'#ffd07a', proj:'#ffd07a', splash:1.9, tier:2 },
-  frost:  { name:'Frost II',  dmg:6,  range:3.5, rate:1.1, color:'#cfe8ff', proj:'#cfe8ff', slow:0.65, slowDur:2.0, tier:2 },
-  chain:  { name:'Chain II',  dmg:22, range:3.8, rate:1.1, color:'#dcbcff', proj:'#ffffff', bounces:5, chainRange:3.0, chainFalloff:0.75, tier:2 },
+
+// Per-tower upgrade tree: 2 branches × 3 tiers each. Pick a branch at tier 1, then climb it.
+// Each tier is an override patch applied on top of the base (or accumulated upgrades).
+const UPGRADES = {
+  bolt: {
+    A: { name:'Sharpshooter', tiers: [
+      { label:'Marksman', cost:75,  dmg:20,  range:4.3, rate:0.8, color:'#9eedff', proj:'#ffffff' },
+      { label:'Sniper',   cost:160, dmg:60,  range:5.6, rate:0.6 },
+      { label:'Deadeye',  cost:340, dmg:200, range:6.8, rate:0.5, execute:0.18 },
+    ]},
+    B: { name:'Repeater', tiers: [
+      { label:'Burst',  cost:70,  dmg:7,  range:3.3, rate:2.2, color:'#bff5ff' },
+      { label:'Auto',   cost:140, dmg:9,  range:3.6, rate:3.8 },
+      { label:'Tempest',cost:300, dmg:14, range:4.0, rate:6.0 },
+    ]},
+  },
+  splash: {
+    A: { name:'Mortar', tiers: [
+      { label:'Heavy',    cost:120, dmg:14, splash:1.7, range:3.3, rate:0.7 },
+      { label:'Howitzer', cost:240, dmg:36, splash:2.1, range:4.2, rate:0.6 },
+      { label:'Carpet',   cost:480, dmg:90, splash:2.6, range:5.0, rate:0.5 },
+    ]},
+    B: { name:'Incendiary', tiers: [
+      { label:'Ember',     cost:120, dmg:7,  splash:1.5, burn:6,  burnDur:3, color:'#ff8a55' },
+      { label:'Inferno',   cost:240, dmg:14, splash:1.9, burn:18, burnDur:4 },
+      { label:'Pyroclasm', cost:480, dmg:24, splash:2.4, burn:50, burnDur:5 },
+    ]},
+  },
+  frost: {
+    A: { name:'Glacier', tiers: [
+      { label:'Chill',      cost:100, dmg:5,  slow:0.6,  slowDur:2.0 },
+      { label:'Deepfreeze', cost:200, dmg:12, slow:0.8,  slowDur:2.6 },
+      { label:'Cryogenic',  cost:420, dmg:28, slow:0.92, slowDur:3.2, color:'#e0f4ff', proj:'#ffffff' },
+    ]},
+    B: { name:'Hailstorm', tiers: [
+      { label:'Spread',   cost:100, dmg:3, slow:0.4,  slowDur:1.5, slowRadius:1.5 },
+      { label:'Blizzard', cost:200, dmg:6, slow:0.55, slowDur:2.0, slowRadius:2.2 },
+      { label:'Whiteout', cost:420, dmg:14,slow:0.7,  slowDur:2.6, slowRadius:3.0 },
+    ]},
+  },
+  chain: {
+    A: { name:'Conductor', tiers: [
+      { label:'Arc Master',      cost:120, dmg:14, bounces:4,  chainRange:2.8, chainFalloff:0.8 },
+      { label:'Tesla Coil',      cost:240, dmg:32, bounces:7,  chainRange:3.2, chainFalloff:0.88 },
+      { label:'Lightning Storm', cost:500, dmg:70, bounces:12, chainRange:3.8, chainFalloff:0.92 },
+    ]},
+    B: { name:'Surge', tiers: [
+      { label:'Overcharge',  cost:120, dmg:26, bounces:1, chainRange:2.4, rate:0.8 },
+      { label:'Plasma',      cost:240, dmg:75, bounces:0, splash:1.6, rate:0.7, chainRange:0 },
+      { label:'Singularity', cost:500, dmg:210,bounces:0, splash:2.2, rate:0.5 },
+    ]},
+  },
 };
 
 const CREEPS = {
@@ -170,7 +234,6 @@ const CREEPS = {
   fast:     { hp:10, speed:2.8, bounty:3, color:'#ffe066', size:0.28 },
   armored:  { hp:55, speed:0.9, bounty:8, color:'#8a8a99', size:0.40, armor:0.5 },
   swarm:    { hp:5,  speed:1.8, bounty:1, color:'#ff8aa0', size:0.22 },
-  air:      { hp:30, speed:1.9, bounty:6, color:'#dbe2ff', size:0.32, flying:true },
   boss:     { hp:220,speed:0.8, bounty:80, color:'#ff6a82', size:0.55, boss:true, armor:0.25 },
 };
 
@@ -252,7 +315,7 @@ function placeTower(c, r) {
   if (state.gold < tdef.cost) { setMsg('Not enough gold.'); return; }
   if (state.grid[r][c]) { setMsg('Tile occupied.'); return; }
   if (!canPlace(c, r)) { setMsg('That would seal the path.'); return; }
-  state.grid[r][c] = { type: state.selectedTower, tier: 1, cooldown: 0, c, r };
+  state.grid[r][c] = { type: state.selectedTower, branch: null, tier: 0, cooldown: 0, c, r, invested: tdef.cost };
   state.gold -= tdef.cost;
   recomputePath();
   state.selectedCell = null;
@@ -264,30 +327,43 @@ function sellSelected() {
   if (!t) return;
   const tower = state.grid[t.r][t.c];
   if (!tower) return;
-  const baseCost = TOWERS[tower.type].cost * (tower.tier === 2 ? 3 : 1);
-  state.gold += Math.floor(baseCost * (BAL.sellBackPct / 100));
+  state.gold += Math.floor((tower.invested || TOWERS[tower.type].cost) * (BAL.sellBackPct / 100));
   state.grid[t.r][t.c] = null;
   state.selectedCell = null;
   recomputePath();
   syncHUD();
 }
 
-function mergeSelected() {
-  const t = state.selectedCell;
-  if (!t) return;
-  const tower = state.grid[t.r][t.c];
-  if (!tower || tower.tier !== 1) return;
-  const same = [];
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-    const o = state.grid[r][c];
-    if (o && o.type === tower.type && o.tier === 1 && !(c === t.c && r === t.r)) same.push({c,r});
+// === UPGRADES ===
+function getTowerDef(t) {
+  const def = { ...TOWERS[t.type] };
+  if (t.branch && t.tier > 0) {
+    const tiers = UPGRADES[t.type][t.branch].tiers;
+    for (let i = 0; i < t.tier && i < tiers.length; i++) Object.assign(def, tiers[i]);
   }
-  if (same.length < 2) { setMsg('Need 2 more tier-1 ' + TOWERS[tower.type].name + 's.'); return; }
-  for (const s of same.slice(0,2)) state.grid[s.r][s.c] = null;
-  tower.tier = 2;
-  tower.cooldown = 0;
-  recomputePath();
-  setMsg(TOWERS[tower.type].name + ' merged to tier 2.');
+  return def;
+}
+function getUpgradeOptions(t) {
+  const u = UPGRADES[t.type];
+  if (!u) return [];
+  if (t.tier === 0) {
+    return [
+      { branch:'A', tierIdx:0, label: u.A.tiers[0].label, branchName: u.A.name, cost: u.A.tiers[0].cost },
+      { branch:'B', tierIdx:0, label: u.B.tiers[0].label, branchName: u.B.name, cost: u.B.tiers[0].cost },
+    ];
+  }
+  const tiers = u[t.branch].tiers;
+  if (t.tier >= tiers.length) return [];
+  return [{ branch: t.branch, tierIdx: t.tier, label: tiers[t.tier].label, branchName: u[t.branch].name, cost: tiers[t.tier].cost }];
+}
+function applyUpgrade(t, opt) {
+  if (state.waveActive) { setMsg('Upgrade between waves.'); return; }
+  if (state.gold < opt.cost) { setMsg('Not enough gold.'); return; }
+  state.gold -= opt.cost;
+  t.branch = opt.branch;
+  t.tier = opt.tierIdx + 1;
+  t.invested = (t.invested || TOWERS[t.type].cost) + opt.cost;
+  t.cooldown = 0;
   syncHUD();
 }
 
@@ -305,7 +381,6 @@ function makeWave(n) {
   if (n >= 3) pool.push('fast');
   if (n >= 4) pool.push('armored');
   if (n >= 5) pool.push('swarm','swarm');
-  if (n >= 6 && n % 2 === 0) pool.push('air');
   const hpMul = 1 + n * BAL.waveHpScale;
   for (let i = 0; i < count; i++) {
     const t = pool[Math.floor(Math.random()*pool.length)];
@@ -366,9 +441,10 @@ function spawnCreep(spec) {
   state.creeps.push({
     type: spec.type, x: ENTRY.c + 0.5, y: ENTRY.r + 0.5,
     hp, maxhp: hp, baseSpeed: c.speed,
-    color: c.color, size: c.size, flying: !!c.flying, boss: !!c.boss, armor: c.armor || 0,
+    color: c.color, size: c.size, boss: !!c.boss, armor: c.armor || 0,
     bounty: Math.floor(c.bounty * (spec.bountyMul || 1)),
     slow: 0, slowUntil: 0, hitFlash: 0,
+    burn: 0, burnUntil: 0,
   });
 }
 
@@ -404,19 +480,21 @@ function update(dt) {
     }
   }
 
-  // creep motion
+  // creep motion + burn DoT
   const now = performance.now()/1000;
   for (const cr of state.creeps) {
     if (cr.dead) continue;
     if (cr.hitFlash > 0) cr.hitFlash -= dt;
     if (now > cr.slowUntil) cr.slow = 0;
+    if (cr.burn > 0) {
+      if (now > cr.burnUntil) cr.burn = 0;
+      else damageCreep(cr, cr.burn * dt);
+    }
+    if (cr.dead) continue;
     const sp = cr.baseSpeed * BAL.creepSpeedMul * (1 - cr.slow);
     let tx, ty;
-    if (cr.flying) {
-      tx = EXIT.c + 0.5; ty = EXIT.r + 0.5;
-    } else if (!state.path) {
-      continue;
-    } else {
+    if (!state.path) continue;
+    {
       const cc = Math.floor(cr.x), rr = Math.floor(cr.y);
       let idx = -1;
       for (let i = 0; i < state.path.length; i++) {
@@ -457,13 +535,13 @@ function update(dt) {
     if (!t) continue;
     t.cooldown -= dt;
     if (t.cooldown > 0) continue;
-    const def = t.tier === 2 ? TOWERS_T2[t.type] : TOWERS[t.type];
+    const def = getTowerDef(t);
     let target = null, bestProg = -Infinity;
     for (const cr of state.creeps) {
       if (cr.dead) continue;
       const d = Math.hypot(cr.x - (c + 0.5), cr.y - (r + 0.5));
       if (d > def.range) continue;
-      const prog = cr.flying ? cr.y * 10 : cr.y * 10 + cr.x * 0.01;
+      const prog = cr.y * 10 + cr.x * 0.01;
       if (prog > bestProg) { bestProg = prog; target = cr; }
     }
     if (!target) continue;
@@ -488,14 +566,27 @@ function update(dt) {
       const dmg = p.def.dmg * p.lenMul * (p.dmgMul || 1) * BAL.towerDmgMul;
       if (p.def.splash) {
         for (const cr of state.creeps) {
-          if (cr.dead || cr.flying) continue;
-          if (Math.hypot(cr.x - p.tx, cr.y - p.ty) <= p.def.splash) damageCreep(cr, dmg);
+          if (cr.dead) continue;
+          if (Math.hypot(cr.x - p.tx, cr.y - p.ty) <= p.def.splash) {
+            damageCreep(cr, dmg);
+            if (p.def.burn) { cr.burn = Math.max(cr.burn, p.def.burn); cr.burnUntil = (performance.now()/1000) + p.def.burnDur; }
+            if (p.def.slow) applySlow(cr, p.def.slow, p.def.slowDur);
+          }
         }
         state.effects.push({ type:'boom', x: p.tx, y: p.ty, age: 0, life: 0.35, r: p.def.splash, color: p.color });
       } else {
         if (p.target && !p.target.dead) {
           damageCreep(p.target, dmg);
+          if (p.def.execute && !p.target.dead && p.target.hp / p.target.maxhp < p.def.execute && !p.target.boss) {
+            damageCreep(p.target, p.target.hp + 1);
+          }
           if (p.def.slow) applySlow(p.target, p.def.slow, p.def.slowDur);
+          if (p.def.slowRadius) {
+            for (const cr of state.creeps) {
+              if (cr === p.target || cr.dead) continue;
+              if (Math.hypot(cr.x - p.target.x, cr.y - p.target.y) <= p.def.slowRadius) applySlow(cr, p.def.slow, p.def.slowDur);
+            }
+          }
           if (p.def.bounces && p.bouncesLeft > 0) {
             const hit = p.target;
             p.visited.add(hit);
@@ -573,22 +664,24 @@ function draw() {
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     const t = state.grid[r][c];
     if (!t) continue;
-    const def = t.tier === 2 ? TOWERS_T2[t.type] : TOWERS[t.type];
+    const def = getTowerDef(t);
     const cx = c*cell + cell/2, cy = r*cell + cell/2;
     ctx.fillStyle = '#22263a';
     ctx.fillRect(c*cell+3, r*cell+3, cell-6, cell-6);
     ctx.fillStyle = def.color;
     ctx.beginPath();
-    if (t.tier === 2) {
-      ctx.moveTo(cx, cy - cell*0.32);
-      ctx.lineTo(cx + cell*0.32, cy);
-      ctx.lineTo(cx, cy + cell*0.32);
-      ctx.lineTo(cx - cell*0.32, cy);
-      ctx.closePath();
-    } else {
-      ctx.arc(cx, cy, cell*0.28, 0, Math.PI*2);
-    }
+    ctx.arc(cx, cy, cell*0.28, 0, Math.PI*2);
     ctx.fill();
+    // tier indicator: concentric rings (1 per tier)
+    if (t.tier > 0) {
+      ctx.strokeStyle = t.branch === 'A' ? '#ffd47a' : '#ff7ad4';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < t.tier; i++) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, cell*0.28 + 2 + i*3, 0, Math.PI*2);
+        ctx.stroke();
+      }
+    }
     // selection ring
     if (state.selectedCell && state.selectedCell.c === c && state.selectedCell.r === r) {
       ctx.strokeStyle = '#fff';
@@ -604,18 +697,15 @@ function draw() {
   for (const cr of state.creeps) {
     const cx = cr.x*cell, cy = cr.y*cell;
     ctx.fillStyle = cr.hitFlash > 0 ? '#fff' : cr.color;
-    if (cr.flying) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, cell*cr.size, 0, Math.PI*2);
+    ctx.fill();
+    if (cr.burn > 0) {
+      ctx.strokeStyle = '#ff8a55';
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(cx, cy - cell*cr.size);
-      ctx.lineTo(cx + cell*cr.size, cy);
-      ctx.lineTo(cx, cy + cell*cr.size);
-      ctx.lineTo(cx - cell*cr.size, cy);
-      ctx.closePath();
-      ctx.fill();
-    } else {
-      ctx.beginPath();
-      ctx.arc(cx, cy, cell*cr.size, 0, Math.PI*2);
-      ctx.fill();
+      ctx.arc(cx, cy, cell*cr.size + 1, 0, Math.PI*2);
+      ctx.stroke();
     }
     if (cr.boss) {
       ctx.strokeStyle = '#ffe066';
@@ -700,19 +790,57 @@ function syncHUD() {
   });
   const sel = state.selectedCell ? state.grid[state.selectedCell.r][state.selectedCell.c] : null;
   document.getElementById('sell-btn').disabled = !sel || state.waveActive;
-  let canMerge = false;
-  if (sel && sel.tier === 1) {
-    let count = 0;
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      const o = state.grid[r][c];
-      if (o && o.type === sel.type && o.tier === 1) count++;
-    }
-    canMerge = count >= 3;
-  }
-  document.getElementById('merge-btn').disabled = !canMerge || state.waveActive;
   const wb = document.getElementById('wave-btn');
   wb.textContent = state.waveActive ? 'Wave running…' : 'Start Wave';
   wb.disabled = state.waveActive;
+  refreshTowerInfo(sel);
+}
+
+function refreshTowerInfo(sel) {
+  const ti = document.getElementById('tower-info');
+  if (!sel) { ti.classList.add('hidden'); return; }
+  ti.classList.remove('hidden');
+  const def = getTowerDef(sel);
+  const base = TOWERS[sel.type];
+  let title = base.name;
+  if (sel.tier > 0) {
+    const tierData = UPGRADES[sel.type][sel.branch].tiers[sel.tier-1];
+    title = tierData.label + ' · ' + UPGRADES[sel.type][sel.branch].name + ' T' + sel.tier;
+  }
+  document.getElementById('ti-name').textContent = title;
+  const parts = [
+    'DMG ' + def.dmg.toFixed(0),
+    'RNG ' + def.range.toFixed(1),
+    'RATE ' + (def.rate * BAL.towerRateMul).toFixed(1) + '/s',
+  ];
+  if (def.splash) parts.push('SPL ' + def.splash.toFixed(1));
+  if (def.slow) parts.push('SLOW ' + Math.round(def.slow*100) + '%');
+  if (def.slowRadius) parts.push('AOE ' + def.slowRadius.toFixed(1));
+  if (def.bounces) parts.push('BNC ' + def.bounces);
+  if (def.burn) parts.push('BURN ' + def.burn + '/s');
+  if (def.execute) parts.push('EXEC <' + Math.round(def.execute*100) + '%');
+  document.getElementById('ti-stats').textContent = parts.join(' · ');
+  const wrap = document.getElementById('ti-upgrades');
+  wrap.innerHTML = '';
+  const opts = getUpgradeOptions(sel);
+  if (opts.length === 0) {
+    const m = document.createElement('div');
+    m.className = 'ti-maxed';
+    m.textContent = 'Fully upgraded';
+    wrap.appendChild(m);
+    return;
+  }
+  for (const opt of opts) {
+    const b = document.createElement('button');
+    b.className = 'upg-btn ' + opt.branch;
+    b.disabled = state.gold < opt.cost || state.waveActive;
+    b.innerHTML =
+      '<div class="branch">' + opt.branchName + '</div>' +
+      '<div class="label">' + opt.label + '</div>' +
+      '<div class="cost">' + opt.cost + 'g</div>';
+    b.onclick = () => applyUpgrade(sel, opt);
+    wrap.appendChild(b);
+  }
 }
 
 function setMsg(m) {
@@ -840,7 +968,6 @@ window.addEventListener('DOMContentLoaded', () => {
   cv.addEventListener('pointermove', onMove);
   cv.addEventListener('pointerleave', () => { hoverCell = null; });
   document.getElementById('sell-btn').onclick = sellSelected;
-  document.getElementById('merge-btn').onclick = mergeSelected;
   document.getElementById('wave-btn').onclick = startWave;
   document.getElementById('ov-btn').onclick = startGame;
   document.getElementById('design-toggle').onclick = () => {
