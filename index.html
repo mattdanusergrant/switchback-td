@@ -78,9 +78,10 @@
 </div>
 <script>
 // === CONFIG ===
-const COLS = 33, ROWS = 15;
-const ENTRY = { c: 16, r: 0 };
-const EXIT  = { c: 16, r: ROWS - 1 };
+const START_COLS = 5, ROWS = 15;
+let COLS = START_COLS;
+const ENTRY = { c: Math.floor(START_COLS / 2), r: 0 };
+const EXIT  = { c: Math.floor(START_COLS / 2), r: ROWS - 1 };
 const BASELINE_PATH = ROWS - 1;
 
 const TOWERS = {
@@ -113,6 +114,9 @@ let state;
 let hoverCell = null;
 
 function newState() {
+  COLS = START_COLS;
+  ENTRY.c = Math.floor(START_COLS / 2);
+  EXIT.c  = Math.floor(START_COLS / 2);
   return {
     phase: 'TITLE',
     wave: 0,
@@ -259,8 +263,31 @@ function endWaveIfDone() {
     const interest = Math.floor(state.gold * 0.07);
     state.gold += interest;
     setMsg('Wave cleared. +' + interest + ' interest.');
+    if (state.wave > 0 && state.wave % 5 === 0) growMap();
     syncHUD();
   }
+}
+
+function growMap() {
+  for (let r = 0; r < ROWS; r++) {
+    state.grid[r].unshift(null);
+    state.grid[r].push(null);
+  }
+  COLS += 2;
+  ENTRY.c += 1;
+  EXIT.c  += 1;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const t = state.grid[r][c];
+      if (t) t.c = c;
+    }
+  }
+  if (state.selectedCell) state.selectedCell.c += 1;
+  state.projectiles = [];
+  state.effects = [];
+  recomputePath();
+  resize();
+  showBanner('Map expanded — +1 column on each side');
 }
 
 function spawnCreep(spec) {
