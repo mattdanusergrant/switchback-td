@@ -23,6 +23,9 @@
   canvas { display: block; background: #15182a; border-radius: 6px; box-shadow: 0 0 20px rgba(0,0,0,0.6); }
   #banner { position: absolute; top: 10%; left: 0; right: 0; text-align: center; font-size: 22px; font-weight: 800; color: #ffaa55; text-shadow: 0 0 12px #ff5500; pointer-events: none; opacity: 0; transition: opacity 0.3s; padding: 0 10px; }
   #banner.show { opacity: 1; }
+  #tutorial-tip { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); max-width: 92%; width: 520px; text-align: center; color: #ffe7a8; font-size: 13px; padding: 10px 16px; background: rgba(11,13,18,0.92); border: 1px solid #c8a44e; border-radius: 8px; line-height: 1.45; pointer-events: none; display: none; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+  #tutorial-tip.show { display: block; }
+  #tutorial-tip .tag { display: inline-block; color: #c8a44e; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
   #bottombar { background: #11141c; border-top: 1px solid #1c2030; padding: 8px; }
   #towers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px; }
   .tower-btn { background: #1a1f30; border: 2px solid #2a3045; color: #e6ebff; padding: 8px 4px; border-radius: 6px; cursor: pointer; font-size: 11px; text-align: center; }
@@ -94,6 +97,10 @@
   <div class="dp-row"><label>Boss HP × n ×</label><input type="number" data-key="bossHpScale" step="0.02" min="0"></div>
   <div class="dp-row"><label>Wave count base</label><input type="number" data-key="waveCountBase" step="1" min="1"></div>
   <div class="dp-row"><label>Wave count / wave</label><input type="number" data-key="waveCountPerWave" step="1" min="0"></div>
+  <h4>Tutorial (waves 1-10)</h4>
+  <div class="dp-row"><label>Enabled (1 / 0)</label><input type="number" data-key="tutorialEnabled" step="1" min="0" max="1"></div>
+  <div class="dp-row"><label>HP scale ×</label><input type="number" data-key="tutorialHpScale" step="0.05" min="0"></div>
+  <div class="dp-row"><label>Count scale ×</label><input type="number" data-key="tutorialCountScale" step="0.05" min="0"></div>
   <h4>Combat</h4>
   <div class="dp-row"><label>Tower damage ×</label><input type="number" data-key="towerDmgMul" step="0.1" min="0"></div>
   <div class="dp-row"><label>Tower fire rate ×</label><input type="number" data-key="towerRateMul" step="0.1" min="0"></div>
@@ -115,6 +122,7 @@
   <div id="boardwrap">
     <canvas id="cv"></canvas>
     <div id="banner"></div>
+    <div id="tutorial-tip"></div>
     <div id="overlay" class="show">
       <h1 id="ov-title">Switchback</h1>
       <p id="ov-desc">Place towers to wind the path the creeps walk. Longer maze = more damage. Hold them off — wave by wave.</p>
@@ -157,6 +165,9 @@ const DEFAULT_BAL = {
   towerRateMul: 1.0,
   creepSpeedMul: 1.0,
   projectileSpeedMul: 1.0,
+  tutorialEnabled: 1,
+  tutorialHpScale: 0.55,
+  tutorialCountScale: 0.6,
 };
 let BAL = { ...DEFAULT_BAL };
 try {
@@ -241,6 +252,20 @@ const CREEPS = {
 
 const BOSS_NAMES = ['Vorlak the Unending', 'Mournwight', 'Thresh-Iron Warden', 'Cinderwidow', 'Pale Margrave', 'The Long Knell'];
 
+const TUTORIAL_WAVES = 10;
+const TUTORIAL_TIPS = [
+  'Wave 1 — Tap an empty tile to build a Bolt tower. Creeps walk from IN to OUT.',
+  'Wave 2 — Place a second tower. Towers block tiles — creeps must walk around.',
+  'Wave 3 — Place towers in a row, leaving a gap. Force the path to bend through the gap.',
+  'Wave 4 — Each bend stretches the path. Watch the LENGTH stat — that bonus boosts every tower\'s damage.',
+  'Wave 5 — Try a zigzag layout. Map will expand after this wave, giving you more room.',
+  'Wave 6 — Splash hits groups. Frost slows. Pick a tower that fits your maze\'s choke point.',
+  'Wave 7 — Tap any placed tower to see its two upgrade paths and current stats.',
+  'Wave 8 — Upgrade a tower. Each branch unlocks new powers (burn, execute, bounces, AoE).',
+  'Wave 9 — Stack length: every extra path tile = more damage. Sell and rebuild if needed.',
+  'Wave 10 — Boss wave. Bosses leak 5 lives — keep them in range as long as your maze allows.',
+];
+
 // === STATE ===
 let cv, ctx, cell = 32, gW, gH;
 let state;
@@ -269,6 +294,16 @@ function newState() {
     gameTime: 0,
     speedMul: 2,
   };
+}
+
+function showTutorialTip(forWave) {
+  const el = document.getElementById('tutorial-tip');
+  if (!BAL.tutorialEnabled || forWave > TUTORIAL_TIPS.length || forWave < 1) { el.classList.remove('show'); return; }
+  el.innerHTML = '<div class="tag">Tutorial</div>' + TUTORIAL_TIPS[forWave - 1];
+  el.classList.add('show');
+}
+function hideTutorialTip() {
+  document.getElementById('tutorial-tip').classList.remove('show');
 }
 
 const SPEED_OPTIONS = [1, 2, 4, 8, 16];
@@ -381,18 +416,22 @@ function applyUpgrade(t, opt) {
 // === WAVES ===
 function makeWave(n) {
   const q = [];
+  const tut = BAL.tutorialEnabled && n <= TUTORIAL_WAVES;
+  const hpScaleMul = tut ? BAL.tutorialHpScale : 1;
   if (n % 10 === 0) {
     state.bossName = BOSS_NAMES[Math.floor(Math.random()*BOSS_NAMES.length)];
-    q.push({ type:'boss', delay:0.5, hpMul: 1 + n*BAL.bossHpScale, bountyMul: 1 + (n/10) });
-    for (let i = 0; i < 6; i++) q.push({ type:'standard', delay:0.6, hpMul: 1 + n*BAL.waveHpScale * 0.75 });
+    q.push({ type:'boss', delay:0.5, hpMul: 1 + n*BAL.bossHpScale * hpScaleMul, bountyMul: 1 + (n/10) });
+    const entourage = tut ? 3 : 6;
+    for (let i = 0; i < entourage; i++) q.push({ type:'standard', delay:0.6, hpMul: 1 + n*BAL.waveHpScale * 0.75 * hpScaleMul });
     return q;
   }
-  const count = BAL.waveCountBase + n * BAL.waveCountPerWave;
+  const rawCount = BAL.waveCountBase + n * BAL.waveCountPerWave;
+  const count = Math.max(3, Math.round(rawCount * (tut ? BAL.tutorialCountScale : 1)));
   const pool = ['standard'];
   if (n >= 3) pool.push('fast');
   if (n >= 4) pool.push('armored');
   if (n >= 5) pool.push('swarm','swarm');
-  const hpMul = 1 + n * BAL.waveHpScale;
+  const hpMul = 1 + n * BAL.waveHpScale * hpScaleMul;
   for (let i = 0; i < count; i++) {
     const t = pool[Math.floor(Math.random()*pool.length)];
     q.push({ type: t, delay: t === 'swarm' ? 0.18 : 0.5, hpMul });
@@ -408,6 +447,7 @@ function startWave() {
   state.waveActive = true;
   if (state.wave % 10 === 0) showBanner('Wave ' + state.wave + ' — ' + state.bossName);
   else showBanner('Wave ' + state.wave);
+  hideTutorialTip();
   syncHUD();
 }
 
@@ -418,6 +458,7 @@ function endWaveIfDone() {
     state.gold += interest;
     setMsg('Wave cleared. +' + interest + ' interest.');
     if (state.wave > 0 && BAL.growEveryWaves > 0 && state.wave % BAL.growEveryWaves === 0) growMap();
+    showTutorialTip(state.wave + 1);
     syncHUD();
   }
 }
@@ -872,6 +913,7 @@ function showBanner(text) {
 function gameOver() {
   state.phase = 'GAMEOVER';
   state.waveActive = false;
+  hideTutorialTip();
   const o = document.getElementById('overlay');
   document.getElementById('ov-title').textContent = 'Overrun';
   document.getElementById('ov-desc').textContent = 'The path ran out. Try a longer maze next time.';
@@ -891,6 +933,7 @@ function startGame() {
   recomputePath();
   document.getElementById('overlay').classList.remove('show');
   buildTowerBar();
+  showTutorialTip(1);
   syncHUD();
 }
 
