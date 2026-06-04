@@ -101,6 +101,7 @@
   .dp-note { color: #6a7290; font-size: 11px; margin: 10px 0; font-style: italic; }
   .dp-buttons { display: flex; gap: 6px; margin-top: 10px; }
   .dp-buttons button { flex: 1; background: #2a3045; border: none; color: #e6ebff; padding: 8px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 600; }
+  #dp-auto.on { background: #2b6f4a; color: #fff; }
   .dp-buttons button.primary { background: #2b6f4a; }
   .dp-buttons button:hover { filter: brightness(1.2); }
 </style>
@@ -135,6 +136,10 @@
   <div class="dp-row"><label>Creep speed ×</label><input type="number" data-key="creepSpeedMul" step="0.1" min="0"></div>
   <div class="dp-row"><label>Projectile speed ×</label><input type="number" data-key="projectileSpeedMul" step="0.1" min="0"></div>
   <div class="dp-note">Start values (lives, gold, map width) apply on restart. Everything else is live.</div>
+  <div class="dp-buttons">
+    <button id="dp-auto">▶ Auto Test: OFF</button>
+  </div>
+  <div id="dp-auto-stats" class="dp-note"></div>
   <div class="dp-buttons">
     <button id="dp-reset">Reset</button>
     <button id="dp-apply" class="primary">Apply + Restart</button>
@@ -378,6 +383,9 @@ let cv, ctx, cell = 32, gW, gH;
 let state;
 let hoverCell = null;
 let hudDirty = false; // set by the sim; flushed to the DOM once per frame in the loop
+let autoPlay = false; // AI auto-play mode (Design panel "Auto Test")
+let autoTimer = 0;    // wall-clock accumulator that throttles AI decisions
+let autoStats = { games: 0, bestWave: 0 };
 
 function newState() {
   COLS = BAL.startCols;
@@ -1243,6 +1251,120 @@ function resetDesignPanel() {
   try { localStorage.removeItem('switchback-bal'); } catch(e) {}
 }
 
+// === AUTO-TEST AI ===
+// Picks the highest-priority offered card. Favors offense so a "competent" build
+// is produced — good for surfacing whether damage keeps pace with wave scaling.
+const CARD_PRIORITY = { brutal:9, sharp:8, crit:8, splash:7, chain:7, burn:7, exec:7, quick:6, multi:6, frost:5, longbarrel:4, eagleeye:4, scholar:3, greed:3 };
+function autoPickCard(opts) {
+  let best = opts[0], bestP = -1;
+  for (const c of opts) {
+    const p = (CARD_PRIORITY[c.id] || 1) + Math.random() * 0.5;
+    if (p > bestP) { bestP = p; best = c; }
+  }
+  return best;
+}
+
+// Resolve every pending level-up headlessly (no modal/pause).
+function autoResolveLevelUps() {
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const t = state.grid[r][c];
+    if (!t || !t.pendingLevelUp) continue;
+    let guard = 0;
+    while (t.pendingLevels > 0 && guard++ < 100) {
+      const opts = drawCards(t, 3);
+      if (!opts.length) { t.pendingLevels = 0; break; }
+      const pick = autoPickCard(opts);
+      applyCardTo(pick, t);
+      t.cardLevels[pick.id] = (t.cardLevels[pick.id] || 0) + 1;
+      t.pendingLevels -= 1;
+    }
+    t.pendingLevelUp = t.pendingLevels > 0;
+  }
+}
+
+// Resulting path length if a blocker sat on (c,r); -1 if it would seal the path.
+function autoPathLenWith(c, r) {
+  state.grid[r][c] = { type: '_probe_' };
+  const p = findPathOn(state.grid);
+  state.grid[r][c] = null;
+  return p ? p.length - 1 : -1;
+}
+
+// Greedy: pick the empty tile that maximizes path length without sealing,
+// tie-broken toward tiles adjacent to the current path (for coverage).
+function autoBestSpot() {
+  const pathSet = new Set((state.path || []).map(p => p.r + ',' + p.c));
+  let best = null, bestScore = -Infinity;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (state.grid[r][c]) continue;
+    if (c === ENTRY.c && r === ENTRY.r) continue;
+    if (c === EXIT.c && r === EXIT.r) continue;
+    const len = autoPathLenWith(c, r);
+    if (len < 0) continue;
+    let adj = 0;
+    for (const [dc, dr] of [[1,0],[-1,0],[0,1],[0,-1]]) if (pathSet.has((r+dr) + ',' + (c+dc))) adj = 1;
+    const score = len * 100 + adj * 10 + Math.random();
+    if (score > bestScore) { bestScore = score; best = { c, r }; }
+  }
+  return best;
+}
+
+// Spend most gold between waves on greedy maze towers (capped per gap for compute).
+function autoBuild() {
+  let placed = 0;
+  while (state.gold >= BASIC_TOWER.cost && placed < 6) {
+    const spot = autoBestSpot();
+    if (!spot) break;
+    placeTower(spot.c, spot.r);
+    placed += 1;
+  }
+}
+
+function autoTick() {
+  if (state.phase === 'GAMEOVER') {
+    autoStats.games += 1;
+    autoStats.bestWave = Math.max(autoStats.bestWave, state.wave - 1);
+    startGame();
+    return;
+  }
+  if (state.phase !== 'PLAYING') return;
+  if (state.modalTower) closeCardModal(); // never use the modal in auto mode
+  autoResolveLevelUps();
+  if (!state.waveActive) {
+    autoBuild();
+    autoResolveLevelUps();
+    startWave();
+  }
+  hudDirty = true;
+}
+
+function updateAutoStatsUI() {
+  const el = document.getElementById('dp-auto-stats');
+  if (!el) return;
+  if (!autoPlay) { el.textContent = ''; return; }
+  const lvls = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const t = state.grid[r][c];
+    if (t) lvls.push(t.level);
+  }
+  const maxLvl = lvls.length ? Math.max(...lvls) : 0;
+  el.textContent = 'Games: ' + autoStats.games + ' · best wave ' + autoStats.bestWave +
+    ' · towers ' + lvls.length + ' · max Lv ' + maxLvl;
+}
+
+function toggleAutoPlay() {
+  autoPlay = !autoPlay;
+  const btn = document.getElementById('dp-auto');
+  btn.textContent = (autoPlay ? '⏸ Auto Test: ON' : '▶ Auto Test: OFF');
+  btn.classList.toggle('on', autoPlay);
+  if (autoPlay) {
+    autoStats = { games: 0, bestWave: 0 };
+    autoTimer = 0;
+    if (state.phase !== 'PLAYING') startGame();
+  }
+  updateAutoStatsUI();
+}
+
 // === RESIZE ===
 function targetCols() { return Math.max(COLS, BAL.mapTargetCols | 0); }
 function colOffset() { return Math.floor((targetCols() - COLS) / 2); }
@@ -1311,12 +1433,17 @@ window.addEventListener('DOMContentLoaded', () => {
   };
   document.getElementById('dp-apply').onclick = applyDesignPanel;
   document.getElementById('dp-reset').onclick = resetDesignPanel;
+  document.getElementById('dp-auto').onclick = toggleAutoPlay;
   syncDesignPanelInputs();
 
   let last = performance.now();
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    if (autoPlay) {
+      autoTimer += dt;
+      if (autoTimer >= 0.25) { autoTimer = 0; autoTick(); updateAutoStatsUI(); }
+    }
     if (state.phase === 'PLAYING' && !state.modalTower) {
       const steps = state.speedMul || 1;
       for (let i = 0; i < steps; i++) {
