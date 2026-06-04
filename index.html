@@ -968,16 +968,31 @@ function draw() {
       ctx.arc(cx, cy, cell*0.28, 0, Math.PI*2);
       ctx.fill();
     } else {
-      const sz = Math.max(10, Math.floor(cell * (cardIds.length === 1 ? 0.55 : cardIds.length === 2 ? 0.4 : 0.32)));
+      const n = cardIds.length;
+      const sz = Math.max(10, Math.floor(cell * (n === 1 ? 0.55 : n === 2 ? 0.4 : 0.36)));
       ctx.font = sz + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const spacing = sz * 0.95;
-      const startX = cx - (cardIds.length - 1) * spacing / 2;
-      for (let i = 0; i < cardIds.length; i++) {
+      // Positions for each emoji centered on the tower. 3 emojis arrange as a
+      // pyramid: one on top, two on the bottom.
+      let positions;
+      if (n === 1) {
+        positions = [{ x: cx, y: cy }];
+      } else if (n === 2) {
+        positions = [{ x: cx - spacing/2, y: cy }, { x: cx + spacing/2, y: cy }];
+      } else {
+        const dy = sz * 0.48;
+        positions = [
+          { x: cx,             y: cy - dy },
+          { x: cx - spacing/2, y: cy + dy },
+          { x: cx + spacing/2, y: cy + dy },
+        ];
+      }
+      for (let i = 0; i < n; i++) {
         const card = CARDS.find(cc => cc.id === cardIds[i]);
         if (!card) continue;
-        ctx.fillText(card.emoji, startX + i * spacing, cy);
+        ctx.fillText(card.emoji, positions[i].x, positions[i].y);
       }
     }
     // level indicator: small number in the top-left corner of the tile
