@@ -247,7 +247,8 @@ const BASIC_TOWER = {
 // Effects diverge by level: descIntro/applyIntro fire when the card is first picked,
 // descStack/applyStack fire on subsequent picks (each stack independently calls apply).
 // If applyStack is omitted, applyIntro is reused (e.g. flat stat boosts).
-const CARD_SLOT_LIMIT = 3;
+// A tower can hold as many distinct cards as it has cells (1, 2, or 3).
+function towerSlotLimit(t) { return (t && t.cells) ? t.cells.length : 3; }
 const CARDS = [
   // basic stat boosts — same effect every pick
   { id:'sharp',     emoji:'🔪', name:'Sharpened',    weight:10, canOffer:t=>true, descIntro:'+22% damage',                applyIntro:t=>{ t.dmg *= 1.22; } },
@@ -328,24 +329,27 @@ function xpNeededAt(level) { return Math.ceil(100 * Math.pow(2.1, level - 1)); }
 // Cost = 20g * cell count. Sell refunds BAL.sellBackPct of that.
 const COST_PER_CELL = 20;
 const SHAPES = [
+  // 1-cell
+  { id:'S1',  name:'Pellet',   cells:[[0,0]] },
   // 2-cell
-  { id:'P-H',  name:'Pair →',   cells:[[0,0],[1,0]] },
-  { id:'P-V',  name:'Pair ↓',   cells:[[0,0],[0,1]] },
-  // 3-cell elbows
+  { id:'P-H', name:'Pair →',   cells:[[0,0],[1,0]] },
+  { id:'P-V', name:'Pair ↓',   cells:[[0,0],[0,1]] },
+  // 3-cell elbows + tri-lines
   { id:'L3a', name:'Elbow ↘',  cells:[[0,0],[1,0],[0,1]] },
   { id:'L3b', name:'Elbow ↙',  cells:[[0,0],[-1,0],[0,1]] },
   { id:'L3c', name:'Elbow ↗',  cells:[[0,0],[1,0],[0,-1]] },
   { id:'L3d', name:'Elbow ↖',  cells:[[0,0],[-1,0],[0,-1]] },
-  // 4-cell tetrominoes
-  { id:'T4',  name:'T-Crown',  cells:[[0,0],[-1,0],[1,0],[0,1]] },
-  { id:'L4',  name:'L-Hook',   cells:[[0,0],[0,-1],[0,1],[1,1]] },
-  { id:'J4',  name:'J-Hook',   cells:[[0,0],[0,-1],[0,1],[-1,1]] },
-  { id:'S4',  name:'S-Zag',    cells:[[0,0],[1,0],[0,1],[-1,1]] },
-  { id:'Z4',  name:'Z-Zag',    cells:[[0,0],[-1,0],[0,1],[1,1]] },
-  { id:'O4',  name:'Square',   cells:[[0,0],[1,0],[0,1],[1,1]] },
+  { id:'I3h', name:'Tri ─',    cells:[[0,0],[1,0],[-1,0]] },
+  { id:'I3v', name:'Tri │',    cells:[[0,0],[0,1],[0,-1]] },
 ];
 function shapeCost(shape) { return shape.cells.length * COST_PER_CELL; }
-function randomShape() { return SHAPES[Math.floor(Math.random() * SHAPES.length)]; }
+// Weighted by size: ~25% 1-cell, ~35% 2-cell, ~40% 3-cell.
+function randomShape() {
+  const r = Math.random();
+  const size = r < 0.25 ? 1 : (r < 0.60 ? 2 : 3);
+  const pool = SHAPES.filter(s => s.cells.length === size);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 function newShapeDraft() { return [randomShape(), randomShape(), randomShape()]; }
 
 function isCellOpenForShape(c, r) {
@@ -602,10 +606,10 @@ function awardXp(tower, amount) {
 
 function drawCards(tower, n) {
   const ownedCount = Object.keys(tower.cardLevels).length;
-  const slotsFull = ownedCount >= CARD_SLOT_LIMIT;
+  const slotsFull = ownedCount >= towerSlotLimit(tower);
   const eligible = CARDS.filter(c => {
     if (!c.canOffer(tower)) return false;
-    // 3-distinct rule: if slots are full, only restacks of owned cards are offered.
+    // Slot rule: if slots are full, only restacks of owned cards are offered.
     if (slotsFull && !tower.cardLevels[c.id]) return false;
     return true;
   });
@@ -663,8 +667,9 @@ function openCardModal(tower) {
   const slotInfo = document.getElementById('cm-slots');
   if (slotInfo) {
     const used = Object.keys(tower.cardLevels).length;
-    slotInfo.textContent = used + ' / ' + CARD_SLOT_LIMIT + ' card slots used' +
-      (used >= CARD_SLOT_LIMIT ? ' · only restacks of these cards' : '');
+    const limit = towerSlotLimit(tower);
+    slotInfo.textContent = used + ' / ' + limit + ' card slots used' +
+      (used >= limit ? ' · only restacks of these cards' : '');
   }
   for (const card of opts) {
     const lvl = tower.cardLevels[card.id] || 0;
@@ -1065,83 +1070,74 @@ function draw() {
     ctx.fillStyle = '#3d362d';
     ctx.fillRect(c*cell+5, r*cell+5, cell-10, cell-10);
   }
-  // towers + blockers
+  // towers - each cell holds one card emoji (or stays empty), enforced by the
+  // slot-limit-equals-cell-count rule. Walks the grid but dedupes by tower
+  // identity so each multi-cell tower is drawn once.
   const pulseT = (state.gameTime || 0) * 4;
+  const drawnTowers = new Set();
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-    const t = state.grid[r][c];
-    if (!t || t.type === 'rock') continue;
-    const cx = c*cell + cell/2, cy = r*cell + cell/2;
-    if (t.type === 'blocker') {
-      // Dimmer plate, same color family as the owning tower.
-      ctx.fillStyle = '#1c2236';
-      ctx.fillRect(c*cell+3, r*cell+3, cell-6, cell-6);
-      ctx.fillStyle = (t.tower && t.tower.color) || '#3a4566';
-      ctx.globalAlpha = 0.45;
-      ctx.fillRect(c*cell+6, r*cell+6, cell-12, cell-12);
-      ctx.globalAlpha = 1;
-      continue;
-    }
-    ctx.fillStyle = '#22263a';
-    ctx.fillRect(c*cell+3, r*cell+3, cell-6, cell-6);
-    // Card-emoji identity: replaces the colored dot once the tower owns any card.
-    const cardIds = Object.keys(t.cardLevels);
-    if (cardIds.length === 0) {
-      ctx.fillStyle = t.color;
-      ctx.beginPath();
-      ctx.arc(cx, cy, cell*0.28, 0, Math.PI*2);
-      ctx.fill();
-    } else {
-      const n = cardIds.length;
-      const sz = Math.max(10, Math.floor(cell * (n === 1 ? 0.55 : n === 2 ? 0.4 : 0.36)));
-      ctx.font = sz + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const spacing = sz * 0.95;
-      // Positions for each emoji centered on the tower. 3 emojis arrange as a
-      // pyramid: one on top, two on the bottom.
-      let positions;
-      if (n === 1) {
-        positions = [{ x: cx, y: cy }];
-      } else if (n === 2) {
-        positions = [{ x: cx - spacing/2, y: cy }, { x: cx + spacing/2, y: cy }];
-      } else {
-        const dy = sz * 0.48;
-        positions = [
-          { x: cx,             y: cy - dy },
-          { x: cx - spacing/2, y: cy + dy },
-          { x: cx + spacing/2, y: cy + dy },
-        ];
-      }
-      for (let i = 0; i < n; i++) {
+    const cellRef = state.grid[r][c];
+    if (!cellRef || cellRef.type === 'rock') continue;
+    const tower = cellRef.type === 'tower' ? cellRef : cellRef.tower;
+    if (!tower || drawnTowers.has(tower)) continue;
+    drawnTowers.add(tower);
+    const cardIds = Object.keys(tower.cardLevels);
+    const cells = tower.cells || [{ c: tower.c, r: tower.r }];
+    for (let i = 0; i < cells.length; i++) {
+      const cl = cells[i];
+      const isCenter = (cl.c === tower.c && cl.r === tower.r);
+      const ccx = cl.c * cell + cell / 2;
+      const ccy = cl.r * cell + cell / 2;
+      // Base plate (slightly dimmer for non-center cells)
+      ctx.fillStyle = isCenter ? '#22263a' : '#1c2236';
+      ctx.fillRect(cl.c*cell+3, cl.r*cell+3, cell-6, cell-6);
+      // One emoji per cell (in pick order). If no card for this slot:
+      //   center -> colored dot;  blocker -> dim tinted square.
+      if (cardIds[i]) {
         const card = CARDS.find(cc => cc.id === cardIds[i]);
-        if (!card) continue;
-        ctx.fillText(card.emoji, positions[i].x, positions[i].y);
+        if (card) {
+          const sz = Math.max(12, Math.floor(cell * 0.6));
+          ctx.font = sz + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(card.emoji, ccx, ccy);
+        }
+      } else if (isCenter) {
+        ctx.fillStyle = tower.color;
+        ctx.beginPath();
+        ctx.arc(ccx, ccy, cell*0.28, 0, Math.PI*2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = tower.color;
+        ctx.globalAlpha = 0.35;
+        ctx.fillRect(cl.c*cell+6, cl.r*cell+6, cell-12, cell-12);
+        ctx.globalAlpha = 1;
       }
     }
-    // level indicator: small number in the top-left corner of the tile
-    if (t.level > 1) {
+    // Level number on the center tile (top-left)
+    if (tower.level > 1) {
       const ls = Math.max(9, Math.floor(cell * 0.26));
       ctx.font = 'bold ' + ls + 'px ui-sans-serif, system-ui, sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       ctx.fillStyle = '#ffd47a';
-      ctx.fillText(String(t.level), c*cell + 3, r*cell + 2);
+      ctx.fillText(String(tower.level), tower.c*cell + 3, tower.r*cell + 2);
     }
-    // pending level-up: pulsing yellow glow
-    if (t.pendingLevelUp) {
+    // Pending level-up: pulsing yellow outline on every cell
+    if (tower.pendingLevelUp) {
       const a = 0.5 + 0.5 * Math.sin(pulseT);
       ctx.strokeStyle = 'rgba(255,228,120,' + a.toFixed(2) + ')';
       ctx.lineWidth = 3;
-      ctx.strokeRect(c*cell+1, r*cell+1, cell-2, cell-2);
+      for (const cl of cells) ctx.strokeRect(cl.c*cell+1, cl.r*cell+1, cell-2, cell-2);
     }
-    // selection ring
-    if (state.selectedCell && state.selectedCell.c === c && state.selectedCell.r === r) {
+    // Selection ring around the center + range circle
+    if (state.selectedCell && state.selectedCell.c === tower.c && state.selectedCell.r === tower.r) {
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 2;
-      ctx.strokeRect(c*cell+2, r*cell+2, cell-4, cell-4);
+      ctx.strokeRect(tower.c*cell+2, tower.r*cell+2, cell-4, cell-4);
       ctx.strokeStyle = 'rgba(255,255,255,0.22)';
       ctx.beginPath();
-      ctx.arc(cx, cy, t.range*cell, 0, Math.PI*2);
+      ctx.arc(tower.c*cell + cell/2, tower.r*cell + cell/2, tower.range*cell, 0, Math.PI*2);
       ctx.stroke();
     }
   }
