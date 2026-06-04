@@ -36,10 +36,13 @@
   .bh-tip { color: #8a93b2; font-size: 11px; flex: 1; text-align: right; }
   #actions { display: grid; grid-template-columns: 1fr 0.6fr 1.4fr; gap: 6px; }
   #speed-btn { background: #2a4870; font-variant-numeric: tabular-nums; }
-  #tower-info { background: #11141c; border: 1px solid #2a3045; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; }
-  #tower-info.hidden { display: none; }
+  /* Fixed height so selecting/deselecting a tower never reflows the board. */
+  #tower-info { background: #11141c; border: 1px solid #2a3045; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; height: 112px; display: flex; flex-direction: column; justify-content: center; }
+  #tower-info .ti-empty { display: none; color: #6a7290; font-size: 12px; font-style: italic; text-align: center; }
+  #tower-info.empty .ti-content { display: none; }
+  #tower-info.empty .ti-empty { display: block; }
   #ti-name { font-weight: 700; color: #7ee0ff; font-size: 13px; margin-bottom: 2px; }
-  #ti-stats { font-size: 11px; color: #aab; margin-bottom: 6px; }
+  #ti-stats { font-size: 11px; color: #aab; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #ti-xp-bar { width: 100%; height: 6px; background: #1a1f30; border-radius: 3px; overflow: hidden; margin-bottom: 2px; }
   #ti-xp-fill { height: 100%; background: linear-gradient(90deg, #2b6f4a, #7ee0ff); width: 0%; transition: width 0.2s; }
   #ti-xp-text { font-size: 10px; color: #6a7290; margin-bottom: 6px; }
@@ -163,17 +166,20 @@
       <p id="ov-desc">Place towers to wind the path the creeps walk. Longer maze = more damage. Hold them off — wave by wave.</p>
       <div class="stats" id="ov-stats"></div>
       <button id="ov-btn">Start</button>
-      <div class="tip">Tap an empty tile to build a Tower (100g). Towers gain XP from damage they deal. When a Tower glows, click it to pick 1 of 3 random cards — that's how Towers grow new abilities.</div>
+      <div class="tip">Tap an empty tile to build a Tower (50g). Towers gain XP from damage they deal. When a Tower glows, click it to pick 1 of 3 random cards — that's how Towers grow new abilities.</div>
     </div>
   </div>
   <div id="bottombar">
     <div id="towers"></div>
-    <div id="tower-info" class="hidden">
-      <div id="ti-name">—</div>
-      <div id="ti-stats">—</div>
-      <div id="ti-xp-bar"><div id="ti-xp-fill"></div></div>
-      <div id="ti-xp-text">XP 0 / 0</div>
-      <div id="ti-upgrades"></div>
+    <div id="tower-info" class="empty">
+      <div class="ti-content">
+        <div id="ti-name">—</div>
+        <div id="ti-stats">—</div>
+        <div id="ti-xp-bar"><div id="ti-xp-fill"></div></div>
+        <div id="ti-xp-text">XP 0 / 0</div>
+        <div id="ti-upgrades"></div>
+      </div>
+      <div class="ti-empty">Tap a tower to inspect &amp; upgrade it</div>
     </div>
     <div id="actions">
       <button class="action-btn" id="sell-btn" disabled>Sell</button>
@@ -371,6 +377,7 @@ const TUTORIAL_TIPS = [
 let cv, ctx, cell = 32, gW, gH;
 let state;
 let hoverCell = null;
+let hudDirty = false; // set by the sim; flushed to the DOM once per frame in the loop
 
 function newState() {
   COLS = BAL.startCols;
@@ -705,21 +712,21 @@ function spawnCreep(spec) {
 }
 
 // === COMBAT ===
-function damageCreep(cr, dmg, sourceTower) {
+function damageCreep(cr, dmg, sourceTower, ignoreArmor, silent) {
   if (cr.dead) return;
   const before = cr.hp;
-  const eff = dmg * (1 - cr.armor);
+  const eff = ignoreArmor ? dmg : dmg * (1 - cr.armor);
   cr.hp -= eff;
   cr.hitFlash = 0.1;
-  state.effects.push({ type:'dmg', x: cr.x, y: cr.y - 0.2, text: Math.ceil(eff), age: 0, life: 0.8 });
+  if (!silent) state.effects.push({ type:'dmg', x: cr.x, y: cr.y - 0.2, text: Math.ceil(eff), age: 0, life: 0.8 });
   const realDealt = Math.max(0, Math.min(eff, before));
-  if (sourceTower) awardXp(sourceTower, Math.floor(realDealt));
+  if (sourceTower) awardXp(sourceTower, realDealt);
   if (cr.hp <= 0 && !cr.dead) {
     cr.dead = true;
     const goldGain = Math.floor(cr.bounty * (sourceTower ? sourceTower.goldMul : 1));
     state.gold += goldGain;
     state.effects.push({ type:'poof', x: cr.x, y: cr.y, age: 0, life: 0.4, color: cr.color });
-    syncHUD();
+    hudDirty = true;
   }
 }
 
@@ -749,7 +756,7 @@ function update(dt) {
     if (now > cr.slowUntil) cr.slow = 0;
     if (cr.burn > 0) {
       if (now > cr.burnUntil) cr.burn = 0;
-      else damageCreep(cr, cr.burn * dt, cr.burnSource);
+      else damageCreep(cr, cr.burn * dt, cr.burnSource, false, true); // silent: no per-tick popup
     }
     if (cr.dead) continue;
     const sp = cr.baseSpeed * BAL.creepSpeedMul * (1 - cr.slow);
@@ -783,7 +790,7 @@ function update(dt) {
     if (Math.abs(cr.x - (EXIT.c + 0.5)) < 0.25 && Math.abs(cr.y - (EXIT.r + 0.5)) < 0.25) {
       cr.leaked = true;
       state.lives -= cr.boss ? 5 : 1;
-      syncHUD();
+      hudDirty = true;
       if (state.lives <= 0) { gameOver(); return; }
     }
   }
@@ -845,7 +852,7 @@ function update(dt) {
           damageCreep(p.target, dmg, p.sourceTower);
           if (p.def.burn) { p.target.burn = Math.max(p.target.burn, p.def.burn); p.target.burnUntil = state.gameTime + p.def.burnDur; p.target.burnSource = p.sourceTower; }
           if (p.def.execute && !p.target.dead && p.target.hp / p.target.maxhp < p.def.execute && !p.target.boss) {
-            damageCreep(p.target, p.target.hp + 1, p.sourceTower);
+            damageCreep(p.target, p.target.hp + 1, p.sourceTower, true); // true damage, bypass armor
           }
           if (p.def.slow) applySlow(p.target, p.def.slow, p.def.slowDur);
           if (p.def.slowRadius) {
@@ -1135,8 +1142,8 @@ function towerCardSummary(t) {
 
 function refreshTowerInfo(sel) {
   const ti = document.getElementById('tower-info');
-  if (!sel) { ti.classList.add('hidden'); return; }
-  ti.classList.remove('hidden');
+  if (!sel) { ti.classList.add('empty'); return; }
+  ti.classList.remove('empty');
   document.getElementById('ti-name').textContent = 'Tower · Lv ' + sel.level;
   document.getElementById('ti-stats').textContent = towerStatParts(sel).join(' · ');
   // XP bar
@@ -1150,8 +1157,8 @@ function refreshTowerInfo(sel) {
   if (sel.pendingLevelUp) {
     const b = document.createElement('button');
     b.className = 'upg-btn level-ready';
-    b.innerHTML = '<div class="label">★ Level Up — Choose a card</div>' +
-      (sel.pendingLevels > 1 ? '<div class="branch">' + sel.pendingLevels + ' queued</div>' : '');
+    b.innerHTML = '<div class="label">★ Level Up — Choose a card' +
+      (sel.pendingLevels > 1 ? ' (' + sel.pendingLevels + ' queued)' : '') + '</div>';
     b.onclick = () => openCardModal(sel);
     wrap.appendChild(b);
   } else if (Object.keys(sel.cardLevels).length > 0) {
@@ -1318,6 +1325,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (state.phase !== 'PLAYING') break;
       }
     }
+    if (hudDirty) { syncHUD(); hudDirty = false; }
     draw();
     requestAnimationFrame(loop);
   }
