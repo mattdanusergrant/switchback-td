@@ -1290,8 +1290,38 @@ function autoPathLenWith(c, r) {
   return p ? p.length - 1 : -1;
 }
 
-// Greedy: pick the empty tile that maximizes path length without sealing,
-// tie-broken toward tiles adjacent to the current path (for coverage).
+// Serpentine maze plan: walls every 2 rows (rows 2, 4, 6, ...) with the gap
+// alternating sides. Each wall is filled in order toward the gap so the path is
+// forced to wind. Returns positions in build priority order.
+function autoMazePlan() {
+  const plan = [];
+  for (let i = 0; i * 2 + 2 < ROWS - 1; i++) {
+    const r = 2 + i * 2;
+    const gapRight = i % 2 === 0;
+    if (gapRight) {
+      // gap at col COLS-1; fill from 0 .. COLS-2
+      for (let c = 0; c < COLS - 1; c++) plan.push({ c, r });
+    } else {
+      // gap at col 0; fill from COLS-1 .. 1
+      for (let c = COLS - 1; c > 0; c--) plan.push({ c, r });
+    }
+  }
+  return plan;
+}
+
+function autoNextPlannedTile() {
+  const plan = autoMazePlan();
+  for (const pos of plan) {
+    if (state.grid[pos.r][pos.c]) continue;
+    if (pos.c === ENTRY.c && pos.r === ENTRY.r) continue;
+    if (pos.c === EXIT.c && pos.r === EXIT.r) continue;
+    if (autoPathLenWith(pos.c, pos.r) < 0) continue;
+    return pos;
+  }
+  return null;
+}
+
+// Fallback when the maze plan is full: greedy single-tile path-length maximizer.
 function autoBestSpot() {
   const pathSet = new Set((state.path || []).map(p => p.r + ',' + p.c));
   let best = null, bestScore = -Infinity;
@@ -1309,11 +1339,12 @@ function autoBestSpot() {
   return best;
 }
 
-// Spend most gold between waves on greedy maze towers (capped per gap for compute).
+// Build phase: prefer the serpentine plan, fall back to greedy once it's done.
 function autoBuild() {
   let placed = 0;
-  while (state.gold >= BASIC_TOWER.cost && placed < 6) {
-    const spot = autoBestSpot();
+  while (state.gold >= BASIC_TOWER.cost && placed < 8) {
+    let spot = autoNextPlannedTile();
+    if (!spot) spot = autoBestSpot();
     if (!spot) break;
     placeTower(spot.c, spot.r);
     placed += 1;
