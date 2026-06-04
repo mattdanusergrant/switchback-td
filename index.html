@@ -980,15 +980,14 @@ function draw() {
         ctx.fillText(card.emoji, startX + i * spacing, cy);
       }
     }
-    // level indicator: concentric rings (1 per level above 1)
+    // level indicator: small number in the top-left corner of the tile
     if (t.level > 1) {
-      ctx.strokeStyle = '#ffd47a';
-      ctx.lineWidth = 1.5;
-      for (let i = 0; i < Math.min(6, t.level - 1); i++) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, cell*0.28 + 2 + i*3, 0, Math.PI*2);
-        ctx.stroke();
-      }
+      const ls = Math.max(9, Math.floor(cell * 0.26));
+      ctx.font = 'bold ' + ls + 'px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#ffd47a';
+      ctx.fillText(String(t.level), c*cell + 3, r*cell + 2);
     }
     // pending level-up: pulsing yellow glow
     if (t.pendingLevelUp) {
