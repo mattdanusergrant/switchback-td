@@ -215,7 +215,7 @@ const EXIT  = { c: Math.floor(BAL.startCols / 2), r: ROWS - 1 };
 const BASELINE_PATH = ROWS - 1;
 
 const BASIC_TOWER = {
-  name: 'Tower', cost: 100,
+  name: 'Tower', cost: 50,
   dmg: 6, range: 3.0, rate: 1.0,
   color: '#7ee0ff', proj: '#dffaff',
 };
@@ -263,13 +263,13 @@ function newTowerInstance(c, r) {
     execute: 0, crit: 0, critMul: 1,
     multishot: 1,
     xpMul: 1, goldMul: 1,
-    level: 1, xp: 0, xpToNext: 12,
+    level: 1, xp: 0, xpToNext: xpNeededAt(1),
     pendingLevels: 0, pendingLevelUp: false,
     cards: [],
   };
 }
 
-function xpNeededAt(level) { return Math.ceil(12 * Math.pow(1.45, level - 1)); }
+function xpNeededAt(level) { return Math.ceil(12 * Math.pow(1.7, level - 1)); }
 
 const CREEPS = {
   standard: { hp:20, speed:1.4, bounty:4, color:'#aab2c8', size:0.32 },
