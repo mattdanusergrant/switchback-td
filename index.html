@@ -28,12 +28,18 @@
   #tutorial-tip .tag { display: inline-block; color: #c8a44e; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
   #bottombar { background: #11141c; border-top: 1px solid #1c2030; padding: 8px; }
   #towers { margin-bottom: 6px; }
-  .build-hint { display: flex; align-items: center; gap: 10px; background: #1a1f30; border: 1px solid #2a3045; border-radius: 6px; padding: 8px 12px; }
-  .build-hint.poor { opacity: 0.55; }
-  .bh-label { font-weight: 700; font-size: 12px; color: #7ee0ff; }
-  .bh-cost { color: #ffd47a; font-size: 12px; font-weight: 700; }
-  .build-hint.poor .bh-cost { color: #6a7290; }
-  .bh-tip { color: #8a93b2; font-size: 11px; flex: 1; text-align: right; }
+  .shape-draft { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .shape-btn { display: flex; gap: 8px; align-items: center; background: #1a1f30; border: 2px solid #2a3045; border-radius: 6px; padding: 6px 8px; cursor: pointer; font-family: inherit; color: #e6ebff; text-align: left; }
+  .shape-btn.armed { border-color: #7ee0ff; background: #1f2940; }
+  .shape-btn.poor { opacity: 0.5; cursor: not-allowed; }
+  .shape-btn .sb-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .shape-btn .sb-name { font-size: 11px; font-weight: 700; color: #cdd5ee; }
+  .shape-btn .sb-cost { color: #ffd47a; font-size: 11px; }
+  .shape-btn.poor .sb-cost { color: #6a7290; }
+  .shape-grid { display: grid; gap: 1px; flex: 0 0 auto; }
+  .shape-grid .sg-cell { background: transparent; width: 8px; height: 8px; }
+  .shape-grid .sg-cell.fill { background: #7ee0ff; }
+  .shape-grid .sg-cell.center { background: #ffd47a; }
   #actions { display: grid; grid-template-columns: 1fr 0.6fr 1.4fr; gap: 6px; }
   #speed-btn { background: #2a4870; font-variant-numeric: tabular-nums; }
   /* Fixed height so selecting/deselecting a tower never reflows the board. */
@@ -171,7 +177,7 @@
       <p id="ov-desc">Place towers to wind the path the creeps walk. Longer maze = more damage. Hold them off — wave by wave.</p>
       <div class="stats" id="ov-stats"></div>
       <button id="ov-btn">Start</button>
-      <div class="tip">Tap an empty tile to build a Tower (50g). Towers gain XP from damage they deal. When a Tower glows, click it to pick 1 of 3 random cards — that's how Towers grow new abilities.</div>
+      <div class="tip">Pick 1 of 3 tower shapes at the bottom (20g per cell). The center cell fires — the others extend your maze. Towers gain XP from damage; click a glowing tower to draw a card.</div>
     </div>
   </div>
   <div id="bottombar">
@@ -298,7 +304,7 @@ function applyCardTo(card, tower) {
 
 function newTowerInstance(c, r) {
   return {
-    type: 'basic', c, r, cooldown: 0,
+    type: 'tower', c, r, cooldown: 0,
     invested: BASIC_TOWER.cost,
     dmg: BASIC_TOWER.dmg, range: BASIC_TOWER.range, rate: BASIC_TOWER.rate,
     color: BASIC_TOWER.color, proj: BASIC_TOWER.proj,
@@ -316,6 +322,89 @@ function newTowerInstance(c, r) {
 }
 
 function xpNeededAt(level) { return Math.ceil(100 * Math.pow(2.1, level - 1)); }
+
+// === TOWER SHAPES ===
+// Polyominoes built around a center (cells include [0,0] which fires).
+// Cost = 20g * cell count. Sell refunds BAL.sellBackPct of that.
+const COST_PER_CELL = 20;
+const SHAPES = [
+  // 2-cell
+  { id:'P-H',  name:'Pair →',   cells:[[0,0],[1,0]] },
+  { id:'P-V',  name:'Pair ↓',   cells:[[0,0],[0,1]] },
+  // 3-cell elbows
+  { id:'L3a', name:'Elbow ↘',  cells:[[0,0],[1,0],[0,1]] },
+  { id:'L3b', name:'Elbow ↙',  cells:[[0,0],[-1,0],[0,1]] },
+  { id:'L3c', name:'Elbow ↗',  cells:[[0,0],[1,0],[0,-1]] },
+  { id:'L3d', name:'Elbow ↖',  cells:[[0,0],[-1,0],[0,-1]] },
+  // 4-cell tetrominoes
+  { id:'T4',  name:'T-Crown',  cells:[[0,0],[-1,0],[1,0],[0,1]] },
+  { id:'L4',  name:'L-Hook',   cells:[[0,0],[0,-1],[0,1],[1,1]] },
+  { id:'J4',  name:'J-Hook',   cells:[[0,0],[0,-1],[0,1],[-1,1]] },
+  { id:'S4',  name:'S-Zag',    cells:[[0,0],[1,0],[0,1],[-1,1]] },
+  { id:'Z4',  name:'Z-Zag',    cells:[[0,0],[-1,0],[0,1],[1,1]] },
+  { id:'O4',  name:'Square',   cells:[[0,0],[1,0],[0,1],[1,1]] },
+];
+function shapeCost(shape) { return shape.cells.length * COST_PER_CELL; }
+function randomShape() { return SHAPES[Math.floor(Math.random() * SHAPES.length)]; }
+function newShapeDraft() { return [randomShape(), randomShape(), randomShape()]; }
+
+function isCellOpenForShape(c, r) {
+  if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return false;
+  if (c === ENTRY.c && r === ENTRY.r) return false;
+  if (c === EXIT.c && r === EXIT.r) return false;
+  if (state.grid[r][c]) return false;
+  return true;
+}
+// Returns the absolute cell list if the shape can be placed at (cc,cr), else null.
+function shapeFitsAt(shape, cc, cr) {
+  const cells = [];
+  for (const [dc, dr] of shape.cells) {
+    const c = cc + dc, r = cr + dr;
+    if (!isCellOpenForShape(c, r)) return null;
+    cells.push({ c, r });
+  }
+  // Tentatively block every cell, see if a path still exists.
+  for (const cell of cells) state.grid[cell.r][cell.c] = { type: '_probe_' };
+  const ok = !!findPathOn(state.grid);
+  for (const cell of cells) state.grid[cell.r][cell.c] = null;
+  return ok ? cells : null;
+}
+
+function placeShape(shape, cc, cr) {
+  if (state.waveActive) { setMsg('Build between waves.'); return false; }
+  const cost = shapeCost(shape);
+  if (state.gold < cost) { setMsg('Not enough gold.'); return false; }
+  const cells = shapeFitsAt(shape, cc, cr);
+  if (!cells) { setMsg('Shape doesn’t fit (or would seal the path).'); return false; }
+  const tower = newTowerInstance(cc, cr);
+  tower.shape = shape;
+  tower.cells = cells;
+  tower.invested = cost;
+  state.grid[cr][cc] = tower;
+  for (const cell of cells) {
+    if (cell.c === cc && cell.r === cr) continue;
+    state.grid[cell.r][cell.c] = { type: 'blocker', tower };
+  }
+  state.gold -= cost;
+  recomputePath();
+  state.selectedCell = null;
+  syncHUD();
+  return true;
+}
+
+// Seed random rocks (immutable blockers) at game start.
+function seedRocks() {
+  const target = Math.floor(COLS * ROWS * 0.10);
+  let placed = 0, attempts = 0;
+  while (placed < target && attempts++ < target * 12) {
+    const c = Math.floor(Math.random() * COLS);
+    const r = Math.floor(Math.random() * ROWS);
+    if (!isCellOpenForShape(c, r)) continue;
+    state.grid[r][c] = { type: 'rock' };
+    if (findPathOn(state.grid)) { placed++; }
+    else { state.grid[r][c] = null; }
+  }
+}
 
 const CREEPS = {
   standard: { hp:20, speed:1.4, bounty:4, color:'#aab2c8', size:0.32 },
@@ -356,8 +445,8 @@ const TUTORIAL_WAVE_SPECS = [
   /* 20 */ null,
 ];
 const TUTORIAL_TIPS = [
-  'Wave 1 — You have 150g — enough for 3 Towers (50g each). Tap empty tiles next to the path to build them. Towers gain XP per damage dealt.',
-  'Wave 2 — Place all 3 Towers if you haven\'t. They have no spare gold to spend, so kills + interest fund your next one.',
+  'Wave 1 — Pick one of the 3 tower shapes (20g per cell). The center cell fires; the rest extend your maze. Drop 2-3 between waves.',
+  'Wave 2 — Used shapes refill; unused stay. The map already has random rocks — work them into your wall plan.',
   'Wave 3 — Towers level up from dealing damage. A glowing tower has a card waiting — click it to choose an upgrade.',
   'Wave 4 — Place towers IN the path: they block tiles and force creeps to walk around — that\'s your maze.',
   'Wave 5 — Try a zigzag: alternate gaps so the path winds. Map grows after this wave!',
@@ -404,6 +493,8 @@ function newState() {
     modalTower: null,
     modalCards: null,
     selectedCell: null,
+    shapeDraft: newShapeDraft(),
+    armedShape: null, // index into shapeDraft when a shape is selected for placement
     waveQueue: [],
     spawnTimer: 0,
     waveActive: false,
@@ -472,25 +563,24 @@ function canPlace(c, r) {
   return ok;
 }
 
-function placeTower(c, r) {
-  if (state.waveActive) { setMsg('Build between waves.'); return; }
-  if (state.gold < BASIC_TOWER.cost) { setMsg('Not enough gold.'); return; }
-  if (state.grid[r][c]) { setMsg('Tile occupied.'); return; }
-  if (!canPlace(c, r)) { setMsg('That would seal the path.'); return; }
-  state.grid[r][c] = newTowerInstance(c, r);
-  state.gold -= BASIC_TOWER.cost;
-  recomputePath();
-  state.selectedCell = null;
-  syncHUD();
+// Resolve the actual tower object behind a selected cell (handles blockers).
+function towerFromCell(t) {
+  if (!t) return null;
+  const cell = state.grid[t.r][t.c];
+  if (!cell) return null;
+  if (cell.type === 'tower') return cell;
+  if (cell.type === 'blocker' && cell.tower) return cell.tower;
+  return null;
 }
 
 function sellSelected() {
-  const t = state.selectedCell;
-  if (!t) return;
-  const tower = state.grid[t.r][t.c];
+  const sel = state.selectedCell;
+  const tower = towerFromCell(sel);
   if (!tower) return;
   state.gold += Math.floor(tower.invested * (BAL.sellBackPct / 100));
-  state.grid[t.r][t.c] = null;
+  for (const cell of (tower.cells || [{ c: tower.c, r: tower.r }])) {
+    state.grid[cell.r][cell.c] = null;
+  }
   state.selectedCell = null;
   recomputePath();
   closeCardModal();
@@ -692,6 +782,14 @@ function growMap() {
       if (t) t.c = c;
     }
   }
+  // Shift each multi-cell tower's recorded cells (touch each tower once).
+  const seen = new Set();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const t = state.grid[r][c];
+    if (!t || t.type !== 'tower' || seen.has(t)) continue;
+    seen.add(t);
+    if (t.cells) for (const cell of t.cells) cell.c += add;
+  }
   if (state.selectedCell) state.selectedCell.c += add;
   state.projectiles = [];
   state.effects = [];
@@ -804,11 +902,11 @@ function update(dt) {
   }
   state.creeps = state.creeps.filter(c => !c.dead && !c.leaked);
 
-  // towers fire
+  // towers fire (skip rocks and blocker cells of multi-cell towers)
   const lenMul = lengthBonus();
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     const t = state.grid[r][c];
-    if (!t) continue;
+    if (!t || t.type !== 'tower') continue;
     t.cooldown -= dt;
     if (t.cooldown > 0) continue;
     const inRange = [];
@@ -941,23 +1039,48 @@ function draw() {
   // entry/exit
   drawSpecialTile(ENTRY.c, ENTRY.r, '#2b6f4a', 'IN');
   drawSpecialTile(EXIT.c,  EXIT.r,  '#a83a3a', 'OUT');
-  // hover preview
-  if (hoverCell && !state.waveActive && state.phase === 'PLAYING') {
-    const { c, r } = hoverCell;
-    const occupied = state.grid[r][c];
-    if (!occupied && !(c === ENTRY.c && r === ENTRY.r) && !(c === EXIT.c && r === EXIT.r)) {
-      const ok = state.gold >= BASIC_TOWER.cost && canPlace(c, r);
+  // hover preview (armed shape footprint)
+  if (hoverCell && !state.waveActive && state.phase === 'PLAYING' && state.armedShape != null) {
+    const shape = state.shapeDraft[state.armedShape];
+    if (shape) {
+      const fit = shapeFitsAt(shape, hoverCell.c, hoverCell.r);
+      const ok = fit && state.gold >= shapeCost(shape);
       ctx.strokeStyle = ok ? '#7ee0ff90' : '#ff5a5a90';
+      ctx.fillStyle = ok ? 'rgba(126,224,255,0.18)' : 'rgba(255,90,90,0.18)';
       ctx.lineWidth = 2;
-      ctx.strokeRect(c*cell+2, r*cell+2, cell-4, cell-4);
+      for (const [dc, dr] of shape.cells) {
+        const c = hoverCell.c + dc, r = hoverCell.r + dr;
+        if (c < 0 || c >= COLS || r < 0 || r >= ROWS) continue;
+        ctx.fillRect(c*cell+2, r*cell+2, cell-4, cell-4);
+        ctx.strokeRect(c*cell+2, r*cell+2, cell-4, cell-4);
+      }
     }
   }
-  // towers
+  // rocks (drawn under tower iteration as their own pass for clarity)
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const t = state.grid[r][c];
+    if (!t || t.type !== 'rock') continue;
+    ctx.fillStyle = '#2a2620';
+    ctx.fillRect(c*cell+2, r*cell+2, cell-4, cell-4);
+    ctx.fillStyle = '#3d362d';
+    ctx.fillRect(c*cell+5, r*cell+5, cell-10, cell-10);
+  }
+  // towers + blockers
   const pulseT = (state.gameTime || 0) * 4;
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     const t = state.grid[r][c];
-    if (!t) continue;
+    if (!t || t.type === 'rock') continue;
     const cx = c*cell + cell/2, cy = r*cell + cell/2;
+    if (t.type === 'blocker') {
+      // Dimmer plate, same color family as the owning tower.
+      ctx.fillStyle = '#1c2236';
+      ctx.fillRect(c*cell+3, r*cell+3, cell-6, cell-6);
+      ctx.fillStyle = (t.tower && t.tower.color) || '#3a4566';
+      ctx.globalAlpha = 0.45;
+      ctx.fillRect(c*cell+6, r*cell+6, cell-12, cell-12);
+      ctx.globalAlpha = 1;
+      continue;
+    }
     ctx.fillStyle = '#22263a';
     ctx.fillRect(c*cell+3, r*cell+3, cell-6, cell-6);
     // Card-emoji identity: replaces the colored dot once the tower owns any card.
@@ -1123,10 +1246,8 @@ function syncHUD() {
   document.getElementById('gold').textContent = state.gold;
   const lb = Math.round((lengthBonus() - 1) * 100);
   document.getElementById('lenb').textContent = '+' + lb + '%';
-  document.querySelectorAll('.build-hint').forEach(b => {
-    b.classList.toggle('poor', state.gold < BASIC_TOWER.cost);
-  });
-  const sel = state.selectedCell ? state.grid[state.selectedCell.r][state.selectedCell.c] : null;
+  renderShapeDraft();
+  const sel = towerFromCell(state.selectedCell);
   document.getElementById('sell-btn').disabled = !sel || state.waveActive;
   const wb = document.getElementById('wave-btn');
   wb.textContent = state.waveActive ? 'Wave running…' : 'Start Wave';
@@ -1226,6 +1347,7 @@ function startGame() {
   document.getElementById('card-modal').classList.remove('show');
   state = newState();
   state.phase = 'PLAYING';
+  seedRocks();
   recomputePath();
   document.getElementById('overlay').classList.remove('show');
   buildTowerBar();
@@ -1235,13 +1357,54 @@ function startGame() {
 }
 
 function buildTowerBar() {
-  const wrap = document.getElementById('towers');
-  wrap.innerHTML =
-    '<div class="build-hint">' +
-      '<span class="bh-label">Build Tower</span>' +
-      '<span class="bh-cost">' + BASIC_TOWER.cost + 'g</span>' +
-      '<span class="bh-tip">Tap empty tile · Towers level from damage · Click glowing tower for a card</span>' +
-    '</div>';
+  document.getElementById('towers').innerHTML = '<div class="shape-draft" id="shape-draft"></div>';
+  renderShapeDraft();
+}
+
+// Mini-icon for a shape: a CSS grid of fill/empty cells, centered cell highlighted.
+function shapeIconHTML(shape) {
+  const cells = shape.cells;
+  let mnC = Infinity, mxC = -Infinity, mnR = Infinity, mxR = -Infinity;
+  for (const [dc, dr] of cells) {
+    if (dc < mnC) mnC = dc; if (dc > mxC) mxC = dc;
+    if (dr < mnR) mnR = dr; if (dr > mxR) mxR = dr;
+  }
+  const w = mxC - mnC + 1, h = mxR - mnR + 1;
+  let html = '<div class="shape-grid" style="grid-template-columns:repeat(' + w + ',8px);grid-template-rows:repeat(' + h + ',8px);">';
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const dc = mnC + c, dr = mnR + r;
+    const isFill = cells.some(([sc, sr]) => sc === dc && sr === dr);
+    const isCenter = dc === 0 && dr === 0;
+    const cls = !isFill ? 'sg-cell' : (isCenter ? 'sg-cell fill center' : 'sg-cell fill');
+    html += '<div class="' + cls + '"></div>';
+  }
+  return html + '</div>';
+}
+
+function renderShapeDraft() {
+  if (!state || !state.shapeDraft) return;
+  const wrap = document.getElementById('shape-draft');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  for (let i = 0; i < state.shapeDraft.length; i++) {
+    const shape = state.shapeDraft[i];
+    const cost = shapeCost(shape);
+    const armed = state.armedShape === i;
+    const poor = state.gold < cost;
+    const btn = document.createElement('button');
+    btn.className = 'shape-btn' + (armed ? ' armed' : '') + (poor ? ' poor' : '');
+    btn.innerHTML = shapeIconHTML(shape) +
+      '<div class="sb-info"><span class="sb-name">' + shape.name + '</span>' +
+      '<span class="sb-cost">' + cost + 'g</span></div>';
+    btn.onclick = () => {
+      if (state.waveActive) { setMsg('Build between waves.'); return; }
+      if (state.gold < cost) { setMsg('Not enough gold for that shape.'); return; }
+      state.armedShape = armed ? null : i;
+      state.selectedCell = null;
+      syncHUD();
+    };
+    wrap.appendChild(btn);
+  }
 }
 
 // === DESIGN PANEL ===
@@ -1355,13 +1518,43 @@ function autoBestSpot() {
 
 // Build phase: prefer the serpentine plan, fall back to greedy once it's done.
 function autoBuild() {
-  let placed = 0;
-  while (state.gold >= BASIC_TOWER.cost && placed < 8) {
-    let spot = autoNextPlannedTile();
-    if (!spot) spot = autoBestSpot();
-    if (!spot) break;
-    placeTower(spot.c, spot.r);
-    placed += 1;
+  let placed = 0, stuck = 0;
+  while (placed < 10 && stuck < 6) {
+    // Pick the most expensive affordable shape (most maze pressure per slot).
+    let pickIdx = -1, pickCost = -1;
+    for (let i = 0; i < state.shapeDraft.length; i++) {
+      const c = shapeCost(state.shapeDraft[i]);
+      if (state.gold >= c && c > pickCost) { pickCost = c; pickIdx = i; }
+    }
+    if (pickIdx < 0) break; // can't afford anything
+    const shape = state.shapeDraft[pickIdx];
+    // Try planned positions first, then a broad scan.
+    let placedOk = false;
+    const planned = autoNextPlannedTile();
+    const candidates = [];
+    if (planned) candidates.push(planned);
+    // Fallback: scan every empty cell for a valid fit (greedy: longest resulting path).
+    let bestSpot = null, bestLen = -1;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      if (state.grid[r][c]) continue;
+      const fit = shapeFitsAt(shape, c, r);
+      if (!fit) continue;
+      for (const cell of fit) state.grid[cell.r][cell.c] = { type: '_probe_' };
+      const p = findPathOn(state.grid);
+      for (const cell of fit) state.grid[cell.r][cell.c] = null;
+      const len = p ? p.length - 1 : -1;
+      if (len > bestLen) { bestLen = len; bestSpot = { c, r }; }
+    }
+    if (bestSpot) candidates.push(bestSpot);
+    for (const spot of candidates) {
+      if (placeShape(shape, spot.c, spot.r)) {
+        state.shapeDraft[pickIdx] = randomShape();
+        placed += 1;
+        placedOk = true;
+        break;
+      }
+    }
+    if (!placedOk) stuck += 1;
   }
 }
 
@@ -1446,13 +1639,24 @@ function onTap(e) {
   if (!p) return;
   const existing = state.grid[p.r][p.c];
   if (existing) {
-    state.selectedCell = p;
+    if (existing.type === 'rock') { state.selectedCell = null; state.armedShape = null; syncHUD(); return; }
+    const tower = towerFromCell(p);
+    state.selectedCell = tower ? { c: tower.c, r: tower.r } : null;
+    state.armedShape = null;
     syncHUD();
-    if (existing.pendingLevelUp) openCardModal(existing);
+    if (tower && tower.pendingLevelUp) openCardModal(tower);
     return;
   }
-  state.selectedCell = null;
-  placeTower(p.c, p.r);
+  // Empty cell: try to place the armed shape from the draft.
+  if (state.armedShape != null) {
+    const shape = state.shapeDraft[state.armedShape];
+    if (shape && placeShape(shape, p.c, p.r)) {
+      state.shapeDraft[state.armedShape] = randomShape();
+      state.armedShape = null;
+    }
+  } else {
+    setMsg('Pick a shape below first, then tap an empty tile.');
+  }
   syncHUD();
 }
 
