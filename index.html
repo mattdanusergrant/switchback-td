@@ -884,7 +884,7 @@ function draw() {
       ctx.strokeRect(c*cell+2, r*cell+2, cell-4, cell-4);
       ctx.strokeStyle = 'rgba(255,255,255,0.22)';
       ctx.beginPath();
-      ctx.arc(cx, cy, def.range*cell, 0, Math.PI*2);
+      ctx.arc(cx, cy, t.range*cell, 0, Math.PI*2);
       ctx.stroke();
     }
   }
@@ -1078,6 +1078,7 @@ function gameOver() {
 }
 
 function startGame() {
+  document.getElementById('card-modal').classList.remove('show');
   state = newState();
   state.phase = 'PLAYING';
   recomputePath();
