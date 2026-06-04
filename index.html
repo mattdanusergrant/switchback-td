@@ -206,8 +206,8 @@ const DEFAULT_BAL = {
   growEveryWaves: 5,
   growColsPerSide: 1,
   lengthBonusPerTile: 0.5,
-  waveHpScale: 0.20,
-  bossHpScale: 0.18,
+  waveHpScale: 0.30,
+  bossHpScale: 0.25,
   waveCountBase: 6,
   waveCountPerWave: 2,
   towerDmgMul: 1.0,
@@ -244,8 +244,8 @@ const BASIC_TOWER = {
 const CARD_SLOT_LIMIT = 3;
 const CARDS = [
   // basic stat boosts — same effect every pick
-  { id:'sharp',     emoji:'🔪', name:'Sharpened',    weight:10, canOffer:t=>true, descIntro:'+30% damage',                applyIntro:t=>{ t.dmg *= 1.3; } },
-  { id:'brutal',    emoji:'💪', name:'Brutal',       weight:8,  canOffer:t=>true, descIntro:'+60% damage, ×0.9 fire rate',applyIntro:t=>{ t.dmg *= 1.6; t.rate *= 0.9; } },
+  { id:'sharp',     emoji:'🔪', name:'Sharpened',    weight:10, canOffer:t=>true, descIntro:'+22% damage',                applyIntro:t=>{ t.dmg *= 1.22; } },
+  { id:'brutal',    emoji:'💪', name:'Brutal',       weight:8,  canOffer:t=>true, descIntro:'+40% damage, ×0.88 fire rate',applyIntro:t=>{ t.dmg *= 1.4; t.rate *= 0.88; } },
   { id:'quick',     emoji:'💨', name:'Quickdraw',    weight:10, canOffer:t=>true, descIntro:'+35% fire rate',             applyIntro:t=>{ t.rate *= 1.35; } },
   { id:'longbarrel',emoji:'📏', name:'Long Barrel',  weight:10, canOffer:t=>true, descIntro:'+1 range',                   applyIntro:t=>{ t.range += 1; } },
   { id:'eagleeye',  emoji:'🦅', name:'Eagle Eye',    weight:6,  canOffer:t=>true, descIntro:'+2 range, ×0.85 fire rate',  applyIntro:t=>{ t.range += 2; t.rate *= 0.85; } },
@@ -271,10 +271,10 @@ const CARDS = [
     applyIntro:t=>{ t.burn = 5; t.burnDur = 3; },
     applyStack:t=>{ t.burn += 6; t.burnDur += 0.5; } },
   { id:'crit',      emoji:'🎯', name:'Headshot',     weight:8,  canOffer:t=>true,
-    descIntro:'25% crit chance, ×2.5 damage on crit',
-    descStack:'+15% crit chance, +0.4× crit multiplier',
-    applyIntro:t=>{ t.crit = 0.25; t.critMul = 2.5; },
-    applyStack:t=>{ t.crit = Math.min(1.0, t.crit + 0.15); t.critMul += 0.4; } },
+    descIntro:'20% crit chance, ×2.0 damage on crit',
+    descStack:'+10% crit chance, +0.25× crit multiplier',
+    applyIntro:t=>{ t.crit = 0.20; t.critMul = 2.0; },
+    applyStack:t=>{ t.crit = Math.min(1.0, t.crit + 0.10); t.critMul += 0.25; } },
   { id:'multi',     emoji:'🏹', name:'Multishot',    weight:6,  canOffer:t=>true, descIntro:'+1 projectile per shot',    applyIntro:t=>{ t.multishot += 1; } },
   // rare / late
   { id:'exec',      emoji:'💀', name:'Executioner',  weight:4,  canOffer:t=>t.level >= 4,
@@ -315,7 +315,7 @@ function newTowerInstance(c, r) {
   };
 }
 
-function xpNeededAt(level) { return Math.ceil(50 * Math.pow(1.9, level - 1)); }
+function xpNeededAt(level) { return Math.ceil(100 * Math.pow(2.1, level - 1)); }
 
 const CREEPS = {
   standard: { hp:20, speed:1.4, bounty:4, color:'#aab2c8', size:0.32 },
