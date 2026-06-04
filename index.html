@@ -27,13 +27,13 @@
   #tutorial-tip.show { display: block; }
   #tutorial-tip .tag { display: inline-block; color: #c8a44e; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
   #bottombar { background: #11141c; border-top: 1px solid #1c2030; padding: 8px; }
-  #towers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px; }
-  .tower-btn { background: #1a1f30; border: 2px solid #2a3045; color: #e6ebff; padding: 8px 4px; border-radius: 6px; cursor: pointer; font-size: 11px; text-align: center; }
-  .tower-btn.selected { border-color: #7ee0ff; background: #1f2940; }
-  .tower-btn.poor { color: #6a7290; }
-  .tower-btn .name { font-weight: 700; font-size: 13px; }
-  .tower-btn .cost { color: #ffd47a; font-size: 11px; margin-top: 2px; }
-  .tower-btn.poor .cost { color: #6a7290; }
+  #towers { margin-bottom: 6px; }
+  .build-hint { display: flex; align-items: center; gap: 10px; background: #1a1f30; border: 1px solid #2a3045; border-radius: 6px; padding: 8px 12px; }
+  .build-hint.poor { opacity: 0.55; }
+  .bh-label { font-weight: 700; font-size: 12px; color: #7ee0ff; }
+  .bh-cost { color: #ffd47a; font-size: 12px; font-weight: 700; }
+  .build-hint.poor .bh-cost { color: #6a7290; }
+  .bh-tip { color: #8a93b2; font-size: 11px; flex: 1; text-align: right; }
   #actions { display: grid; grid-template-columns: 1fr 0.6fr 1.4fr; gap: 6px; }
   #speed-btn { background: #2a4870; font-variant-numeric: tabular-nums; }
   #tower-info { background: #11141c; border: 1px solid #2a3045; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; }
@@ -102,6 +102,7 @@
   <div class="dp-row"><label>Sell-back %</label><input type="number" data-key="sellBackPct" step="5" min="0" max="100"></div>
   <h4>Map</h4>
   <div class="dp-row"><label>Start width (cols)</label><input type="number" data-key="startCols" step="2" min="3"></div>
+  <div class="dp-row"><label>Map camera width (cols)</label><input type="number" data-key="mapTargetCols" step="2" min="5"></div>
   <div class="dp-row"><label>Grow every N waves</label><input type="number" data-key="growEveryWaves" step="1" min="1"></div>
   <div class="dp-row"><label>Grow cols / side</label><input type="number" data-key="growColsPerSide" step="1" min="0"></div>
   <div class="dp-row"><label>Length bonus / tile %</label><input type="number" data-key="lengthBonusPerTile" step="0.05" min="0"></div>
@@ -174,6 +175,7 @@ const DEFAULT_BAL = {
   interestPct: 7,
   sellBackPct: 80,
   startCols: 5,
+  mapTargetCols: 25,
   growEveryWaves: 5,
   growColsPerSide: 1,
   lengthBonusPerTile: 0.5,
@@ -804,6 +806,16 @@ function update(dt) {
 // === DRAW ===
 function draw() {
   ctx.clearRect(0, 0, gW, gH);
+  // Locked-area backdrop (everything outside current play area)
+  const ox = colOffset();
+  ctx.fillStyle = '#0a0c12';
+  ctx.fillRect(0, 0, gW, gH);
+  // Active-area subtle frame
+  ctx.fillStyle = '#0e1320';
+  ctx.fillRect(ox*cell, 0, COLS*cell, ROWS*cell);
+  // Translate so all subsequent drawing uses logical [0, COLS) on x.
+  ctx.save();
+  ctx.translate(ox * cell, 0);
   // grid tiles
   ctx.fillStyle = '#1a1e2e';
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
@@ -946,6 +958,18 @@ function draw() {
       ctx.stroke();
     }
   }
+  ctx.restore();
+  // Locked-area dim cell lattice (drawn in absolute coords, outside translate)
+  const tc = targetCols();
+  ctx.fillStyle = '#10131c';
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < ox; c++) ctx.fillRect(c*cell+1, r*cell+1, cell-2, cell-2);
+    for (let c = ox + COLS; c < tc; c++) ctx.fillRect(c*cell+1, r*cell+1, cell-2, cell-2);
+  }
+  // Active-area border
+  ctx.strokeStyle = '#2a3045';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(ox*cell + 0.5, 0.5, COLS*cell - 1, ROWS*cell - 1);
 }
 
 function drawSpecialTile(c, r, color, label) {
@@ -965,7 +989,7 @@ function syncHUD() {
   document.getElementById('gold').textContent = state.gold;
   const lb = Math.round((lengthBonus() - 1) * 100);
   document.getElementById('lenb').textContent = '+' + lb + '%';
-  document.querySelectorAll('.tower-btn').forEach(b => {
+  document.querySelectorAll('.build-hint').forEach(b => {
     b.classList.toggle('poor', state.gold < BASIC_TOWER.cost);
   });
   const sel = state.selectedCell ? state.grid[state.selectedCell.r][state.selectedCell.c] : null;
@@ -1059,18 +1083,19 @@ function startGame() {
   recomputePath();
   document.getElementById('overlay').classList.remove('show');
   buildTowerBar();
+  resize();
   showTutorialTip(1);
   syncHUD();
 }
 
 function buildTowerBar() {
   const wrap = document.getElementById('towers');
-  wrap.innerHTML = '';
-  const b = document.createElement('button');
-  b.className = 'tower-btn selected';
-  b.innerHTML = '<div class="name">Tower</div><div class="cost">' + BASIC_TOWER.cost + 'g</div>' +
-    '<div style="font-size:10px;color:#aab;margin-top:2px;">Levels up per damage. Click highlighted tower to choose a card.</div>';
-  wrap.appendChild(b);
+  wrap.innerHTML =
+    '<div class="build-hint">' +
+      '<span class="bh-label">Build Tower</span>' +
+      '<span class="bh-cost">' + BASIC_TOWER.cost + 'g</span>' +
+      '<span class="bh-tip">Tap empty tile · Towers level from damage · Click glowing tower for a card</span>' +
+    '</div>';
 }
 
 // === DESIGN PANEL ===
@@ -1095,12 +1120,15 @@ function resetDesignPanel() {
 }
 
 // === RESIZE ===
+function targetCols() { return Math.max(COLS, BAL.mapTargetCols | 0); }
+function colOffset() { return Math.floor((targetCols() - COLS) / 2); }
 function resize() {
   const wrap = document.getElementById('boardwrap');
   const w = wrap.clientWidth;
   const h = wrap.clientHeight;
-  cell = Math.max(16, Math.floor(Math.min(w / COLS, h / ROWS)));
-  gW = cell * COLS;
+  const tc = targetCols();
+  cell = Math.max(12, Math.floor(Math.min(w / tc, h / ROWS)));
+  gW = cell * tc;
   gH = cell * ROWS;
   cv.width = gW; cv.height = gH;
   cv.style.width = gW + 'px';
@@ -1112,7 +1140,8 @@ function cellFromEvent(e) {
   const rect = cv.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
-  const c = Math.floor(x / cell);
+  const ox = colOffset();
+  const c = Math.floor(x / cell) - ox;
   const r = Math.floor(y / cell);
   if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return null;
   return { c, r };
