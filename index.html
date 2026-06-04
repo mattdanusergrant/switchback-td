@@ -55,7 +55,13 @@
   #card-modal { position: fixed; inset: 0; z-index: 200; background: rgba(8,10,18,0.92); display: none; align-items: center; justify-content: center; flex-direction: column; padding: 20px; }
   #card-modal.show { display: flex; }
   #cm-title { color: #7ee0ff; font-size: 22px; font-weight: 700; margin-bottom: 4px; text-align: center; letter-spacing: 0.06em; text-transform: uppercase; }
-  #cm-subtitle { color: #aab; font-size: 13px; margin-bottom: 22px; text-align: center; }
+  #cm-subtitle { color: #aab; font-size: 13px; margin-bottom: 14px; text-align: center; }
+  #cm-current { max-width: 720px; width: 100%; background: #11141c; border: 1px solid #2a3045; border-radius: 8px; padding: 10px 14px; margin-bottom: 18px; text-align: center; }
+  #cm-current-stats { color: #aab; font-size: 12px; margin-bottom: 6px; }
+  #cm-current-cards { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  #cm-current-cards:empty { display: none; }
+  .cm-owned { background: #1f2940; border: 1px solid #3a4a6a; border-radius: 4px; padding: 2px 8px; font-size: 11px; color: #ffd47a; }
+  #cm-current-cards .cm-none { color: #6a7290; font-size: 11px; font-style: italic; }
   #cm-cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
   .cm-card { width: 220px; min-height: 200px; background: linear-gradient(180deg, #1f2940, #11141c); border: 2px solid #2a5a8a; border-radius: 10px; padding: 18px 14px; cursor: pointer; color: #e6ebff; font-family: inherit; display: flex; flex-direction: column; align-items: center; text-align: center; transition: transform 0.15s, border-color 0.15s; }
   .cm-card:hover { border-color: #7ee0ff; transform: translateY(-4px); box-shadow: 0 8px 24px rgba(126,224,255,0.25); }
@@ -129,6 +135,10 @@
 <div id="card-modal">
   <div id="cm-title">Tower Level <span id="cm-level">2</span></div>
   <div id="cm-subtitle">Choose 1 of 3 cards<span id="cm-remaining"></span></div>
+  <div id="cm-current">
+    <div id="cm-current-stats"></div>
+    <div id="cm-current-cards"></div>
+  </div>
   <div id="cm-cards"></div>
 </div>
 <div id="app">
@@ -481,6 +491,24 @@ function openCardModal(tower) {
   wrap.innerHTML = '';
   document.getElementById('cm-level').textContent = tower.level;
   document.getElementById('cm-remaining').textContent = tower.pendingLevels > 1 ? ' · ' + tower.pendingLevels + ' level-ups queued' : '';
+  // Current build: stats + owned cards
+  document.getElementById('cm-current-stats').textContent = towerStatParts(tower).join(' · ');
+  const ownedWrap = document.getElementById('cm-current-cards');
+  ownedWrap.innerHTML = '';
+  const owned = towerCardSummary(tower);
+  if (owned.length === 0) {
+    const none = document.createElement('span');
+    none.className = 'cm-none';
+    none.textContent = 'No cards yet';
+    ownedWrap.appendChild(none);
+  } else {
+    for (const label of owned) {
+      const chip = document.createElement('span');
+      chip.className = 'cm-owned';
+      chip.textContent = label;
+      ownedWrap.appendChild(chip);
+    }
+  }
   for (const card of opts) {
     const btn = document.createElement('button');
     btn.className = 'cm-card';
@@ -1001,25 +1029,44 @@ function syncHUD() {
   refreshTowerInfo(sel);
 }
 
+function towerStatParts(t) {
+  const parts = [
+    'DMG ' + t.dmg.toFixed(0),
+    'RNG ' + t.range.toFixed(1),
+    'RATE ' + (t.rate * BAL.towerRateMul).toFixed(1) + '/s',
+  ];
+  if (t.splash) parts.push('SPL ' + t.splash.toFixed(1));
+  if (t.slow) parts.push('SLOW ' + Math.round(t.slow*100) + '%');
+  if (t.slowRadius) parts.push('AOE ' + t.slowRadius.toFixed(1));
+  if (t.bounces) parts.push('BNC ' + t.bounces);
+  if (t.burn) parts.push('BURN ' + t.burn.toFixed(0) + '/s');
+  if (t.crit) parts.push('CRT ' + Math.round(t.crit*100) + '%×' + t.critMul.toFixed(1));
+  if (t.execute) parts.push('EXEC <' + Math.round(t.execute*100) + '%');
+  if (t.multishot > 1) parts.push('×' + t.multishot);
+  return parts;
+}
+
+// Owned cards as "Name" or "Name ×N" (stackable cards picked more than once).
+function towerCardSummary(t) {
+  const counts = [];
+  const seen = {};
+  for (const id of t.cards) {
+    if (seen[id] === undefined) { seen[id] = counts.length; counts.push({ id, n: 1 }); }
+    else counts[seen[id]].n += 1;
+  }
+  return counts.map(({ id, n }) => {
+    const card = CARDS.find(c => c.id === id);
+    const name = card ? card.name : id;
+    return n > 1 ? name + ' ×' + n : name;
+  });
+}
+
 function refreshTowerInfo(sel) {
   const ti = document.getElementById('tower-info');
   if (!sel) { ti.classList.add('hidden'); return; }
   ti.classList.remove('hidden');
   document.getElementById('ti-name').textContent = 'Tower · Lv ' + sel.level;
-  const parts = [
-    'DMG ' + sel.dmg.toFixed(0),
-    'RNG ' + sel.range.toFixed(1),
-    'RATE ' + (sel.rate * BAL.towerRateMul).toFixed(1) + '/s',
-  ];
-  if (sel.splash) parts.push('SPL ' + sel.splash.toFixed(1));
-  if (sel.slow) parts.push('SLOW ' + Math.round(sel.slow*100) + '%');
-  if (sel.slowRadius) parts.push('AOE ' + sel.slowRadius.toFixed(1));
-  if (sel.bounces) parts.push('BNC ' + sel.bounces);
-  if (sel.burn) parts.push('BURN ' + sel.burn.toFixed(0) + '/s');
-  if (sel.crit) parts.push('CRT ' + Math.round(sel.crit*100) + '%×' + sel.critMul.toFixed(1));
-  if (sel.execute) parts.push('EXEC <' + Math.round(sel.execute*100) + '%');
-  if (sel.multishot > 1) parts.push('×' + sel.multishot);
-  document.getElementById('ti-stats').textContent = parts.join(' · ');
+  document.getElementById('ti-stats').textContent = towerStatParts(sel).join(' · ');
   // XP bar
   const xpFill = document.getElementById('ti-xp-fill');
   const xpPct = Math.min(100, 100 * sel.xp / sel.xpToNext);
@@ -1038,10 +1085,7 @@ function refreshTowerInfo(sel) {
   } else if (sel.cards.length > 0) {
     const m = document.createElement('div');
     m.className = 'ti-maxed';
-    m.textContent = 'Cards: ' + sel.cards.map(id => {
-      const card = CARDS.find(c => c.id === id);
-      return card ? card.name : id;
-    }).join(', ');
+    m.textContent = 'Cards: ' + towerCardSummary(sel).join(', ');
     wrap.appendChild(m);
   }
 }
