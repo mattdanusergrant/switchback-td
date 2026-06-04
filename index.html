@@ -181,7 +181,7 @@
 // === BALANCE (tweakable via Design panel) ===
 const DEFAULT_BAL = {
   startLives: 25,
-  startGold: 250,
+  startGold: 150,
   interestPct: 7,
   sellBackPct: 80,
   startCols: 5,
@@ -283,33 +283,36 @@ const BOSS_NAMES = ['Vorlak the Unending', 'Mournwight', 'Thresh-Iron Warden', '
 
 const TUTORIAL_WAVES = 20;
 // Hand-tuned tutorial waves. Boss waves (10, 20) are handled by the boss override.
-// Goal: standards-only for the first 6, fast at 7, armored at 11, swarm at 14 — slow ramp.
+// Calibrated for a 3-tower opening (150g, 0 spare): early power comes from leveling
+// those 3 towers via cards, not from adding towers, so the HP/count ramp stays gentle
+// until gold income (kills + interest) lets the player widen the maze.
+// Standards-only through wave 6, fast at 7, armored at 11, swarm at 14.
 const TUTORIAL_WAVE_SPECS = [
-  /*  1 */ { count: 2,  hpMul: 0.5, delay: 0.9,  pool: ['standard'] },
-  /*  2 */ { count: 3,  hpMul: 0.7, delay: 0.8,  pool: ['standard'] },
-  /*  3 */ { count: 4,  hpMul: 0.85,delay: 0.75, pool: ['standard'] },
-  /*  4 */ { count: 5,  hpMul: 1.0, delay: 0.7,  pool: ['standard'] },
-  /*  5 */ { count: 6,  hpMul: 1.2, delay: 0.65, pool: ['standard'] },
-  /*  6 */ { count: 5,  hpMul: 1.4, delay: 0.6,  pool: ['standard'] },
-  /*  7 */ { count: 6,  hpMul: 1.5, delay: 0.55, pool: ['standard', 'fast'] },
-  /*  8 */ { count: 7,  hpMul: 1.6, delay: 0.5,  pool: ['standard', 'fast'] },
-  /*  9 */ { count: 8,  hpMul: 1.7, delay: 0.5,  pool: ['standard', 'fast'] },
+  /*  1 */ { count: 2,  hpMul: 0.5, delay: 1.0,  pool: ['standard'] },
+  /*  2 */ { count: 3,  hpMul: 0.6, delay: 0.85, pool: ['standard'] },
+  /*  3 */ { count: 3,  hpMul: 0.75,delay: 0.8,  pool: ['standard'] },
+  /*  4 */ { count: 4,  hpMul: 0.9, delay: 0.75, pool: ['standard'] },
+  /*  5 */ { count: 4,  hpMul: 1.0, delay: 0.7,  pool: ['standard'] },
+  /*  6 */ { count: 5,  hpMul: 1.1, delay: 0.65, pool: ['standard'] },
+  /*  7 */ { count: 5,  hpMul: 1.2, delay: 0.6,  pool: ['standard','standard','fast'] },
+  /*  8 */ { count: 6,  hpMul: 1.3, delay: 0.55, pool: ['standard','standard','fast'] },
+  /*  9 */ { count: 7,  hpMul: 1.4, delay: 0.5,  pool: ['standard','fast'] },
   /* 10 */ null,
-  /* 11 */ { count: 7,  hpMul: 1.9, delay: 0.5,  pool: ['standard','standard','standard','fast','armored'] },
-  /* 12 */ { count: 8,  hpMul: 2.0, delay: 0.5,  pool: ['standard','standard','fast','fast','armored'] },
-  /* 13 */ { count: 9,  hpMul: 2.1, delay: 0.45, pool: ['standard','standard','fast','armored','armored'] },
-  /* 14 */ { count: 11, hpMul: 2.2, delay: 0.4,  pool: ['standard','standard','fast','armored','swarm','swarm'] },
-  /* 15 */ { count: 13, hpMul: 2.3, delay: 0.4,  pool: ['standard','fast','armored','swarm','swarm'] },
-  /* 16 */ { count: 15, hpMul: 2.5, delay: 0.4,  pool: ['standard','fast','armored','swarm','swarm'] },
-  /* 17 */ { count: 17, hpMul: 2.7, delay: 0.4,  pool: ['standard','fast','armored','swarm'] },
-  /* 18 */ { count: 19, hpMul: 2.9, delay: 0.4,  pool: ['standard','fast','armored','swarm'] },
-  /* 19 */ { count: 22, hpMul: 3.1, delay: 0.38, pool: ['standard','fast','armored','swarm'] },
+  /* 11 */ { count: 6,  hpMul: 1.5, delay: 0.55, pool: ['standard','standard','standard','fast','armored'] },
+  /* 12 */ { count: 7,  hpMul: 1.6, delay: 0.5,  pool: ['standard','standard','fast','fast','armored'] },
+  /* 13 */ { count: 8,  hpMul: 1.7, delay: 0.5,  pool: ['standard','standard','fast','armored','armored'] },
+  /* 14 */ { count: 9,  hpMul: 1.8, delay: 0.45, pool: ['standard','standard','fast','armored','swarm','swarm'] },
+  /* 15 */ { count: 11, hpMul: 1.9, delay: 0.45, pool: ['standard','fast','armored','swarm','swarm'] },
+  /* 16 */ { count: 13, hpMul: 2.0, delay: 0.4,  pool: ['standard','fast','armored','swarm','swarm'] },
+  /* 17 */ { count: 15, hpMul: 2.2, delay: 0.4,  pool: ['standard','fast','armored','swarm'] },
+  /* 18 */ { count: 17, hpMul: 2.4, delay: 0.4,  pool: ['standard','fast','armored','swarm'] },
+  /* 19 */ { count: 19, hpMul: 2.6, delay: 0.38, pool: ['standard','fast','armored','swarm'] },
   /* 20 */ null,
 ];
 const TUTORIAL_TIPS = [
-  'Wave 1 — You have 250g (2 Towers). Tap an empty tile next to the path to build one. Towers gain XP per damage dealt.',
-  'Wave 2 — Add a second Tower. Two towers covering the path = double damage on every creep.',
-  'Wave 3 — Towers level up from dealing damage. A glowing tower has a card waiting — click it to choose.',
+  'Wave 1 — You have 150g — enough for 3 Towers (50g each). Tap empty tiles next to the path to build them. Towers gain XP per damage dealt.',
+  'Wave 2 — Place all 3 Towers if you haven\'t. They have no spare gold to spend, so kills + interest fund your next one.',
+  'Wave 3 — Towers level up from dealing damage. A glowing tower has a card waiting — click it to choose an upgrade.',
   'Wave 4 — Place towers IN the path: they block tiles and force creeps to walk around — that\'s your maze.',
   'Wave 5 — Try a zigzag: alternate gaps so the path winds. Map grows after this wave!',
   'Wave 6 — Watch LENGTH rise as your maze gets longer. That % boosts every tower\'s damage.',
