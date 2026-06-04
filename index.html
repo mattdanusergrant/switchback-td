@@ -60,12 +60,17 @@
   #cm-current-stats { color: #aab; font-size: 12px; margin-bottom: 6px; }
   #cm-current-cards { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
   #cm-current-cards:empty { display: none; }
+  #cm-slots { color: #6a7290; font-size: 11px; margin-top: 6px; font-style: italic; }
   .cm-owned { background: #1f2940; border: 1px solid #3a4a6a; border-radius: 4px; padding: 2px 8px; font-size: 11px; color: #ffd47a; }
   #cm-current-cards .cm-none { color: #6a7290; font-size: 11px; font-style: italic; }
   #cm-cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
-  .cm-card { width: 220px; min-height: 200px; background: linear-gradient(180deg, #1f2940, #11141c); border: 2px solid #2a5a8a; border-radius: 10px; padding: 18px 14px; cursor: pointer; color: #e6ebff; font-family: inherit; display: flex; flex-direction: column; align-items: center; text-align: center; transition: transform 0.15s, border-color 0.15s; }
+  .cm-card { width: 220px; min-height: 220px; background: linear-gradient(180deg, #1f2940, #11141c); border: 2px solid #2a5a8a; border-radius: 10px; padding: 18px 14px; cursor: pointer; color: #e6ebff; font-family: inherit; display: flex; flex-direction: column; align-items: center; text-align: center; transition: transform 0.15s, border-color 0.15s; }
+  .cm-card.cm-card-stack { border-color: #c8a44e; background: linear-gradient(180deg, #2a2418, #11141c); }
   .cm-card:hover { border-color: #7ee0ff; transform: translateY(-4px); box-shadow: 0 8px 24px rgba(126,224,255,0.25); }
-  .cm-card-name { font-size: 18px; font-weight: 700; color: #ffd47a; margin-bottom: 10px; }
+  .cm-card.cm-card-stack:hover { border-color: #ffd47a; box-shadow: 0 8px 24px rgba(255,212,122,0.25); }
+  .cm-card-emoji { font-size: 44px; line-height: 1; margin-bottom: 6px; }
+  .cm-card-name { font-size: 17px; font-weight: 700; color: #ffd47a; margin-bottom: 10px; }
+  .cm-card-lvl { display: inline-block; margin-left: 6px; font-size: 11px; color: #aab; font-weight: 500; vertical-align: middle; }
   .cm-card-desc { font-size: 13px; color: #cdd5ee; line-height: 1.45; }
   .cm-empty { color: #aab; font-size: 14px; }
   .action-btn { background: #2a3045; border: none; color: #e6ebff; padding: 12px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 700; }
@@ -138,6 +143,7 @@
   <div id="cm-current">
     <div id="cm-current-stats"></div>
     <div id="cm-current-cards"></div>
+    <div id="cm-slots"></div>
   </div>
   <div id="cm-cards"></div>
 </div>
@@ -220,35 +226,64 @@ const BASIC_TOWER = {
   color: '#7ee0ff', proj: '#dffaff',
 };
 
-// Cards drawn 3-at-a-time on level up. canOffer gates eligibility (no duplicates of
-// one-shot abilities, no prereqs missing). Each card mutates the tower instance directly.
+// Each tower is limited to 3 DISTINCT cards. Picking the same card again upgrades it.
+// Effects diverge by level: descIntro/applyIntro fire when the card is first picked,
+// descStack/applyStack fire on subsequent picks (each stack independently calls apply).
+// If applyStack is omitted, applyIntro is reused (e.g. flat stat boosts).
+const CARD_SLOT_LIMIT = 3;
 const CARDS = [
-  // basic stat boosts
-  { id:'sharp',     name:'Sharpened',    desc:'+30% damage',                        weight:10, canOffer:t=>true,                apply:t=>{ t.dmg *= 1.3; } },
-  { id:'brutal',    name:'Brutal',       desc:'+60% damage, -10% fire rate',        weight:8,  canOffer:t=>true,                apply:t=>{ t.dmg *= 1.6; t.rate *= 0.9; } },
-  { id:'quick',     name:'Quickdraw',    desc:'+35% fire rate',                     weight:10, canOffer:t=>true,                apply:t=>{ t.rate *= 1.35; } },
-  { id:'longbarrel',name:'Long Barrel',  desc:'+1 range',                           weight:10, canOffer:t=>true,                apply:t=>{ t.range += 1; } },
-  { id:'eagleeye',  name:'Eagle Eye',    desc:'+2 range, -15% fire rate',           weight:6,  canOffer:t=>true,                apply:t=>{ t.range += 2; t.rate *= 0.85; } },
-  // mechanic intros
-  { id:'splash',    name:'Splash Round', desc:'Shots explode (1.2 radius)',         weight:8,  canOffer:t=>!t.splash,           apply:t=>{ t.splash = 1.2; } },
-  { id:'frost',     name:'Frostbite',    desc:'Shots slow 40% for 1.5s',            weight:8,  canOffer:t=>!t.slow,             apply:t=>{ t.slow = 0.4; t.slowDur = 1.5; } },
-  { id:'chain',     name:'Lightning',    desc:'Shots chain to 2 nearby creeps',     weight:8,  canOffer:t=>!t.bounces,          apply:t=>{ t.bounces = 2; t.chainRange = 2.6; t.chainFalloff = 0.7; } },
-  { id:'burn',      name:'Embers',       desc:'Shots burn for 5/s over 3s',         weight:8,  canOffer:t=>!t.burn,             apply:t=>{ t.burn = 5; t.burnDur = 3; } },
-  { id:'crit',      name:'Headshot',     desc:'25% crit chance, 2.5× damage',       weight:8,  canOffer:t=>!t.crit,             apply:t=>{ t.crit = 0.25; t.critMul = 2.5; } },
-  { id:'multi',     name:'Multishot',    desc:'+1 projectile per shot',             weight:6,  canOffer:t=>t.multishot < 3,     apply:t=>{ t.multishot += 1; } },
-  // mechanic upgrades (require prereq)
-  { id:'splash2',   name:'Wider Boom',   desc:'+0.6 splash radius, +20% damage',    weight:6,  canOffer:t=>t.splash > 0,        apply:t=>{ t.splash += 0.6; t.dmg *= 1.2; } },
-  { id:'frost2',    name:'Deep Freeze',  desc:'+25% slow, +1s duration',            weight:6,  canOffer:t=>t.slow > 0,          apply:t=>{ t.slow = Math.min(0.95, t.slow + 0.25); t.slowDur += 1; } },
-  { id:'frost3',    name:'Hailstorm',    desc:'Slow spreads in 1.5 radius',         weight:5,  canOffer:t=>t.slow > 0 && !t.slowRadius, apply:t=>{ t.slowRadius = 1.5; } },
-  { id:'chain2',    name:'More Bolts',   desc:'+3 chain bounces',                   weight:6,  canOffer:t=>t.bounces > 0,       apply:t=>{ t.bounces += 3; } },
-  { id:'chain3',    name:'Conductor',    desc:'Chain falloff +12%, +0.5 chain range', weight:5,canOffer:t=>t.bounces > 0,       apply:t=>{ t.chainFalloff = Math.min(0.95, t.chainFalloff + 0.12); t.chainRange += 0.5; } },
-  { id:'burn2',     name:'Inferno',      desc:'+8/s burn damage, +1s duration',     weight:6,  canOffer:t=>t.burn > 0,          apply:t=>{ t.burn += 8; t.burnDur += 1; } },
-  { id:'crit2',     name:'Lethal Crit',  desc:'+20% crit, +0.5× crit multiplier',   weight:5,  canOffer:t=>t.crit > 0,          apply:t=>{ t.crit = Math.min(1.0, t.crit + 0.2); t.critMul += 0.5; } },
+  // basic stat boosts — same effect every pick
+  { id:'sharp',     emoji:'🔪', name:'Sharpened',    weight:10, canOffer:t=>true, descIntro:'+30% damage',                applyIntro:t=>{ t.dmg *= 1.3; } },
+  { id:'brutal',    emoji:'💪', name:'Brutal',       weight:8,  canOffer:t=>true, descIntro:'+60% damage, ×0.9 fire rate',applyIntro:t=>{ t.dmg *= 1.6; t.rate *= 0.9; } },
+  { id:'quick',     emoji:'💨', name:'Quickdraw',    weight:10, canOffer:t=>true, descIntro:'+35% fire rate',             applyIntro:t=>{ t.rate *= 1.35; } },
+  { id:'longbarrel',emoji:'📏', name:'Long Barrel',  weight:10, canOffer:t=>true, descIntro:'+1 range',                   applyIntro:t=>{ t.range += 1; } },
+  { id:'eagleeye',  emoji:'🦅', name:'Eagle Eye',    weight:6,  canOffer:t=>true, descIntro:'+2 range, ×0.85 fire rate',  applyIntro:t=>{ t.range += 2; t.rate *= 0.85; } },
+  // mechanic intros — first pick adds the mechanic, subsequent picks deepen it
+  { id:'splash',    emoji:'💥', name:'Splash Round', weight:8,  canOffer:t=>true,
+    descIntro:'Shots explode (1.2 radius)',
+    descStack:'+0.5 splash radius, +15% damage',
+    applyIntro:t=>{ t.splash = 1.2; },
+    applyStack:t=>{ t.splash += 0.5; t.dmg *= 1.15; } },
+  { id:'frost',     emoji:'❄️', name:'Frostbite',    weight:8,  canOffer:t=>true,
+    descIntro:'Shots slow 40% for 1.5s',
+    descStack:'+15% slow, +0.5s duration',
+    applyIntro:t=>{ t.slow = 0.4; t.slowDur = 1.5; },
+    applyStack:t=>{ t.slow = Math.min(0.95, t.slow + 0.15); t.slowDur += 0.5; } },
+  { id:'chain',     emoji:'⚡', name:'Lightning',    weight:8,  canOffer:t=>true,
+    descIntro:'Shots chain to 2 nearby creeps (70% falloff)',
+    descStack:'+2 chain bounces, +6% falloff',
+    applyIntro:t=>{ t.bounces = 2; t.chainRange = 2.6; t.chainFalloff = 0.7; },
+    applyStack:t=>{ t.bounces += 2; t.chainFalloff = Math.min(0.95, t.chainFalloff + 0.06); } },
+  { id:'burn',      emoji:'🔥', name:'Embers',       weight:8,  canOffer:t=>true,
+    descIntro:'Shots burn for 5/s over 3s',
+    descStack:'+6/s burn damage, +0.5s duration',
+    applyIntro:t=>{ t.burn = 5; t.burnDur = 3; },
+    applyStack:t=>{ t.burn += 6; t.burnDur += 0.5; } },
+  { id:'crit',      emoji:'🎯', name:'Headshot',     weight:8,  canOffer:t=>true,
+    descIntro:'25% crit chance, ×2.5 damage on crit',
+    descStack:'+15% crit chance, +0.4× crit multiplier',
+    applyIntro:t=>{ t.crit = 0.25; t.critMul = 2.5; },
+    applyStack:t=>{ t.crit = Math.min(1.0, t.crit + 0.15); t.critMul += 0.4; } },
+  { id:'multi',     emoji:'🏹', name:'Multishot',    weight:6,  canOffer:t=>true, descIntro:'+1 projectile per shot',    applyIntro:t=>{ t.multishot += 1; } },
   // rare / late
-  { id:'exec',      name:'Executioner',  desc:'Instakill non-boss below 18% HP',    weight:4,  canOffer:t=>!t.execute && t.level >= 4, apply:t=>{ t.execute = 0.18; } },
-  { id:'scholar',   name:'Scholar',      desc:'+60% XP gained',                     weight:5,  canOffer:t=>!t.scholarApplied,   apply:t=>{ t.xpMul *= 1.6; t.scholarApplied = true; } },
-  { id:'greed',     name:'Greed',        desc:'Kills give +50% gold',               weight:4,  canOffer:t=>!t.greedApplied,     apply:t=>{ t.goldMul *= 1.5; t.greedApplied = true; } },
+  { id:'exec',      emoji:'💀', name:'Executioner',  weight:4,  canOffer:t=>t.level >= 4,
+    descIntro:'Instakill non-boss below 18% HP',
+    descStack:'+5% execute threshold',
+    applyIntro:t=>{ t.execute = 0.18; },
+    applyStack:t=>{ t.execute = Math.min(0.5, t.execute + 0.05); } },
+  { id:'scholar',   emoji:'📚', name:'Scholar',      weight:5,  canOffer:t=>true, descIntro:'+50% XP gained',             applyIntro:t=>{ t.xpMul *= 1.5; } },
+  { id:'greed',     emoji:'💰', name:'Greed',        weight:4,  canOffer:t=>true, descIntro:'+40% gold from kills',       applyIntro:t=>{ t.goldMul *= 1.4; } },
 ];
+
+function cardDescFor(card, tower) {
+  const stacked = (tower.cardLevels[card.id] || 0) > 0;
+  return stacked ? (card.descStack || card.descIntro) : card.descIntro;
+}
+function applyCardTo(card, tower) {
+  const stacked = (tower.cardLevels[card.id] || 0) > 0;
+  const fn = stacked ? (card.applyStack || card.applyIntro) : card.applyIntro;
+  fn(tower);
+}
 
 function newTowerInstance(c, r) {
   return {
@@ -265,7 +300,7 @@ function newTowerInstance(c, r) {
     xpMul: 1, goldMul: 1,
     level: 1, xp: 0, xpToNext: xpNeededAt(1),
     pendingLevels: 0, pendingLevelUp: false,
-    cards: [],
+    cardLevels: {},
   };
 }
 
@@ -324,7 +359,7 @@ const TUTORIAL_TIPS = [
   'Wave 12 — Lightning card chains shots between creeps — great for clumps and armored lines.',
   'Wave 13 — Embers card adds burn damage over time — bypasses armor effectively.',
   'Wave 14 — Swarm creeps now (pink, tiny). Splash + Lightning chew through them.',
-  'Wave 15 — Stack one mechanic deep: Splash Round → Wider Boom, or Lightning → More Bolts.',
+  'Wave 15 — Each tower holds 3 different cards max — re-pick the same card to level it up (Splash Lv 2, Lightning Lv 3...).',
   'Wave 16 — Multishot fires multiple projectiles per shot — pairs with Crit or Splash.',
   'Wave 17 — Sell underperforming towers (80% refund) and rebuild for length bonus.',
   'Wave 18 — Executioner card instakills weakened creeps. Strong endgame finisher.',
@@ -461,7 +496,14 @@ function awardXp(tower, amount) {
 }
 
 function drawCards(tower, n) {
-  const eligible = CARDS.filter(c => c.canOffer(tower));
+  const ownedCount = Object.keys(tower.cardLevels).length;
+  const slotsFull = ownedCount >= CARD_SLOT_LIMIT;
+  const eligible = CARDS.filter(c => {
+    if (!c.canOffer(tower)) return false;
+    // 3-distinct rule: if slots are full, only restacks of owned cards are offered.
+    if (slotsFull && !tower.cardLevels[c.id]) return false;
+    return true;
+  });
   const pool = eligible.slice();
   const drawn = [];
   for (let i = 0; i < n && pool.length > 0; i++) {
@@ -512,10 +554,26 @@ function openCardModal(tower) {
       ownedWrap.appendChild(chip);
     }
   }
+  // Slot indicator: "2/3 slots used"
+  const slotInfo = document.getElementById('cm-slots');
+  if (slotInfo) {
+    const used = Object.keys(tower.cardLevels).length;
+    slotInfo.textContent = used + ' / ' + CARD_SLOT_LIMIT + ' card slots used' +
+      (used >= CARD_SLOT_LIMIT ? ' · only restacks of these cards' : '');
+  }
   for (const card of opts) {
+    const lvl = tower.cardLevels[card.id] || 0;
+    const isStack = lvl > 0;
+    const headline = isStack
+      ? card.emoji + ' ' + card.name + ' <span class="cm-card-lvl">Lv ' + lvl + ' → ' + (lvl + 1) + '</span>'
+      : card.emoji + ' ' + card.name + ' <span class="cm-card-lvl">New</span>';
+    const desc = cardDescFor(card, tower);
     const btn = document.createElement('button');
-    btn.className = 'cm-card';
-    btn.innerHTML = '<div class="cm-card-name">' + card.name + '</div><div class="cm-card-desc">' + card.desc + '</div>';
+    btn.className = 'cm-card' + (isStack ? ' cm-card-stack' : ' cm-card-new');
+    btn.innerHTML =
+      '<div class="cm-card-emoji">' + card.emoji + '</div>' +
+      '<div class="cm-card-name">' + headline + '</div>' +
+      '<div class="cm-card-desc">' + desc + '</div>';
     btn.onclick = () => pickCard(card);
     wrap.appendChild(btn);
   }
@@ -525,8 +583,8 @@ function openCardModal(tower) {
 function pickCard(card) {
   const tower = state.modalTower;
   if (!tower) return;
-  card.apply(tower);
-  tower.cards.push(card.id);
+  applyCardTo(card, tower);
+  tower.cardLevels[card.id] = (tower.cardLevels[card.id] || 0) + 1;
   tower.pendingLevels = Math.max(0, tower.pendingLevels - 1);
   if (tower.pendingLevels <= 0) {
     tower.pendingLevelUp = false;
@@ -887,10 +945,26 @@ function draw() {
     const cx = c*cell + cell/2, cy = r*cell + cell/2;
     ctx.fillStyle = '#22263a';
     ctx.fillRect(c*cell+3, r*cell+3, cell-6, cell-6);
-    ctx.fillStyle = t.color;
-    ctx.beginPath();
-    ctx.arc(cx, cy, cell*0.28, 0, Math.PI*2);
-    ctx.fill();
+    // Card-emoji identity: replaces the colored dot once the tower owns any card.
+    const cardIds = Object.keys(t.cardLevels);
+    if (cardIds.length === 0) {
+      ctx.fillStyle = t.color;
+      ctx.beginPath();
+      ctx.arc(cx, cy, cell*0.28, 0, Math.PI*2);
+      ctx.fill();
+    } else {
+      const sz = Math.max(10, Math.floor(cell * (cardIds.length === 1 ? 0.55 : cardIds.length === 2 ? 0.4 : 0.32)));
+      ctx.font = sz + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const spacing = sz * 0.95;
+      const startX = cx - (cardIds.length - 1) * spacing / 2;
+      for (let i = 0; i < cardIds.length; i++) {
+        const card = CARDS.find(cc => cc.id === cardIds[i]);
+        if (!card) continue;
+        ctx.fillText(card.emoji, startX + i * spacing, cy);
+      }
+    }
     // level indicator: concentric rings (1 per level above 1)
     if (t.level > 1) {
       ctx.strokeStyle = '#ffd47a';
@@ -1051,16 +1125,11 @@ function towerStatParts(t) {
 
 // Owned cards as "Name" or "Name ×N" (stackable cards picked more than once).
 function towerCardSummary(t) {
-  const counts = [];
-  const seen = {};
-  for (const id of t.cards) {
-    if (seen[id] === undefined) { seen[id] = counts.length; counts.push({ id, n: 1 }); }
-    else counts[seen[id]].n += 1;
-  }
-  return counts.map(({ id, n }) => {
+  return Object.entries(t.cardLevels).map(([id, n]) => {
     const card = CARDS.find(c => c.id === id);
+    const emoji = card ? card.emoji : '';
     const name = card ? card.name : id;
-    return n > 1 ? name + ' ×' + n : name;
+    return emoji + ' ' + name + (n > 1 ? ' Lv ' + n : '');
   });
 }
 
@@ -1085,7 +1154,7 @@ function refreshTowerInfo(sel) {
       (sel.pendingLevels > 1 ? '<div class="branch">' + sel.pendingLevels + ' queued</div>' : '');
     b.onclick = () => openCardModal(sel);
     wrap.appendChild(b);
-  } else if (sel.cards.length > 0) {
+  } else if (Object.keys(sel.cardLevels).length > 0) {
     const m = document.createElement('div');
     m.className = 'ti-maxed';
     m.textContent = 'Cards: ' + towerCardSummary(sel).join(', ');
