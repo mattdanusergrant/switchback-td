@@ -266,15 +266,15 @@ const TUTORIAL_WAVE_SPECS = [
   /*  8 */ { count: 7,  hpMul: 1.6, delay: 0.5,  pool: ['standard', 'fast'] },
   /*  9 */ { count: 8,  hpMul: 1.7, delay: 0.5,  pool: ['standard', 'fast'] },
   /* 10 */ null,
-  /* 11 */ { count: 7,  hpMul: 1.9, delay: 0.5,  pool: ['standard', 'fast', 'armored'] },
-  /* 12 */ { count: 8,  hpMul: 2.0, delay: 0.5,  pool: ['standard', 'fast', 'armored'] },
-  /* 13 */ { count: 9,  hpMul: 2.2, delay: 0.45, pool: ['standard', 'fast', 'armored'] },
-  /* 14 */ { count: 11, hpMul: 2.3, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
-  /* 15 */ { count: 13, hpMul: 2.5, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
-  /* 16 */ { count: 15, hpMul: 2.7, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
-  /* 17 */ { count: 17, hpMul: 2.9, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
-  /* 18 */ { count: 19, hpMul: 3.1, delay: 0.4,  pool: ['standard', 'fast', 'armored', 'swarm'] },
-  /* 19 */ { count: 22, hpMul: 3.3, delay: 0.38, pool: ['standard', 'fast', 'armored', 'swarm'] },
+  /* 11 */ { count: 7,  hpMul: 1.9, delay: 0.5,  pool: ['standard','standard','standard','fast','armored'] },
+  /* 12 */ { count: 8,  hpMul: 2.0, delay: 0.5,  pool: ['standard','standard','fast','fast','armored'] },
+  /* 13 */ { count: 9,  hpMul: 2.1, delay: 0.45, pool: ['standard','standard','fast','armored','armored'] },
+  /* 14 */ { count: 11, hpMul: 2.2, delay: 0.4,  pool: ['standard','standard','fast','armored','swarm','swarm'] },
+  /* 15 */ { count: 13, hpMul: 2.3, delay: 0.4,  pool: ['standard','fast','armored','swarm','swarm'] },
+  /* 16 */ { count: 15, hpMul: 2.5, delay: 0.4,  pool: ['standard','fast','armored','swarm','swarm'] },
+  /* 17 */ { count: 17, hpMul: 2.7, delay: 0.4,  pool: ['standard','fast','armored','swarm'] },
+  /* 18 */ { count: 19, hpMul: 2.9, delay: 0.4,  pool: ['standard','fast','armored','swarm'] },
+  /* 19 */ { count: 22, hpMul: 3.1, delay: 0.38, pool: ['standard','fast','armored','swarm'] },
   /* 20 */ null,
 ];
 const TUTORIAL_TIPS = [
@@ -288,7 +288,7 @@ const TUTORIAL_TIPS = [
   'Wave 8 — Splash hits groups. Useful when creeps clump up.',
   'Wave 9 — Tap any placed tower to see its stats and two upgrade paths.',
   'Wave 10 — Boss wave! Bosses leak 5 lives. Make sure damage is stacked along your longest path.',
-  'Wave 11 — Armored creeps now (grey, slow). They take 50% less damage. Big-hit towers beat them best.',
+  'Wave 11 — Armored creeps now (grey, slow). Slow them with Frost and finish with an upgraded Bolt (Marksman, 75g).',
   'Wave 12 — Try the Sharpshooter Bolt upgrade — slow but huge per-shot damage, ignores small HP.',
   'Wave 13 — Or upgrade Frost to Glacier: 80% slow keeps armored stalled in your fire lanes.',
   'Wave 14 — Swarm creeps now (pink, tiny). Many low-HP units. Splash and Chain shine here.',
@@ -533,11 +533,17 @@ function growMap() {
 
 function spawnCreep(spec) {
   const c = CREEPS[spec.type];
-  const hp = c.hp * (spec.hpMul || 1);
+  let hp = c.hp * (spec.hpMul || 1);
+  let armor = c.armor || 0;
+  // Tutorial mode: armored creeps are softer so new players can chew through them.
+  if (BAL.tutorialEnabled && state.wave <= TUTORIAL_WAVES && spec.type === 'armored') {
+    hp *= 0.7;
+    armor *= 0.5;
+  }
   state.creeps.push({
     type: spec.type, x: ENTRY.c + 0.5, y: ENTRY.r + 0.5,
     hp, maxhp: hp, baseSpeed: c.speed,
-    color: c.color, size: c.size, boss: !!c.boss, armor: c.armor || 0,
+    color: c.color, size: c.size, boss: !!c.boss, armor,
     bounty: Math.floor(c.bounty * (spec.bountyMul || 1)),
     slow: 0, slowUntil: 0, hitFlash: 0,
     burn: 0, burnUntil: 0,
