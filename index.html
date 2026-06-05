@@ -207,10 +207,10 @@ const DEFAULT_BAL = {
   startGold: 150,
   interestPct: 7,
   sellBackPct: 80,
-  startCols: 7,
-  mapTargetCols: 25,
+  startCols: 20,
+  mapTargetCols: 20,
   growEveryWaves: 5,
-  growColsPerSide: 1,
+  growColsPerSide: 0,
   lengthBonusPerTile: 0.5,
   waveHpScale: 0.30,
   bossHpScale: 0.25,
@@ -231,7 +231,7 @@ try {
 } catch(e) {}
 
 // === CONFIG ===
-const ROWS = 15;
+const ROWS = 20;
 let COLS = BAL.startCols;
 const ENTRY = { c: Math.floor(BAL.startCols / 2), r: 0 };
 const EXIT  = { c: Math.floor(BAL.startCols / 2), r: ROWS - 1 };
