@@ -213,7 +213,7 @@
 // === BALANCE (tweakable via Design panel) ===
 const DEFAULT_BAL = {
   startLives: 25,
-  startGold: 150,
+  startGold: 200,
   interestPct: 7,
   sellBackPct: 80,
   startCols: 20,
@@ -1583,11 +1583,11 @@ function autoUpgrade() {
   // Highest coverage first; tiebreak by closer-to-entry (creeps eat damage sooner).
   entries.sort((a, b) => b.cov - a.cov || a.tower.r - b.tower.r);
   // Reserve enough gold to keep building reasonably between waves.
-  // Smaller build-side reserve - just one Pellet's worth - so most gold flows
-  // into upgrades, which multiply damage on every existing tower.
-  const reserve = COST_PER_CELL;
+  // Spend everything that's left. autoBuild already reserved upgrade money,
+  // and kills + interest fund the next gap's build phase.
+  const reserve = 0;
   // First pass: top 40% of towers get priority - concentrated DPS beats spread.
-  const focusN = Math.max(1, Math.ceil(entries.length * 0.4));
+  const focusN = Math.max(2, Math.ceil(entries.length * 0.5));
   let safety = 200;
   // Round-robin within the focused group until budget exhausted, then expand.
   for (let group = 0; group < 2 && safety > 0; group++) {
@@ -1687,18 +1687,18 @@ function autoBuild() {
     const t = state.grid[r][c];
     if (t && t.type === 'tower' && !seenT.has(t)) { seenT.add(t); towerCount++; }
   }
-  // Target: 4 to start, +1 every 3 waves. Capped so upgrades get attention.
+  // Target grows slowly: 4 at the start, +1 every 3 waves.
   const targetTowers = 4 + Math.floor((state.wave || 0) / 3);
   if (towerCount >= targetTowers) return;
   const maxPlace = targetTowers - towerCount;
-  // Reserve gold so the upgrade phase has runway. Scales with how many towers
-  // need feeding (capped to 40% of current gold so we still build sometimes).
-  const upgradeReserve = towerCount > 0
-    ? Math.min(state.gold * 0.4, towerCount * UPGRADE_COST)
-    : 0;
 
   let placed = 0, stuck = 0;
   while (placed < maxPlace && stuck < 4) {
+    // Reserve enough for ONE upgrade per existing tower (recomputed every step
+    // so the cap actually moves as we place). Also enforce at least one upgrade
+    // worth so even the first placement leaves room for an upgrade afterwards.
+    const currentTowers = towerCount + placed;
+    const upgradeReserve = Math.max(UPGRADE_COST, currentTowers * UPGRADE_COST);
     const minShapeCost = state.shapeDraft.reduce((m, s) => Math.min(m, shapeCost(s)), Infinity);
     if (state.gold < minShapeCost + upgradeReserve) break;
 
