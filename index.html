@@ -91,8 +91,15 @@
   #overlay.show { display: flex; }
   #overlay h1 { font-size: 44px; margin-bottom: 8px; color: #7ee0ff; text-shadow: 0 0 14px #2090d0; letter-spacing: 0.12em; }
   #overlay p { color: #aab; margin-bottom: 18px; text-align: center; max-width: 340px; font-size: 14px; line-height: 1.5; }
-  #overlay .stats { margin: 8px 0 18px; color: #ffd47a; text-align: center; font-size: 15px; }
+  #overlay .stats { margin: 8px 0 18px; color: #ffd47a; text-align: center; font-size: 15px; max-width: 880px; width: 92%; }
   #overlay .stats .row { margin: 4px 0; }
+  #overlay .stats .go-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; text-align: left; }
+  #overlay .stats .go-col { background: rgba(17,20,28,0.6); border: 1px solid #2a3045; border-radius: 8px; padding: 10px 12px; }
+  #overlay .stats .go-hd { color: #7ee0ff; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; }
+  #overlay .stats .go-row { color: #cdd5ee; font-size: 12px; margin: 3px 0; }
+  #overlay .stats .go-row b { color: #ffd47a; }
+  #overlay .stats .go-cards { margin-top: 12px; background: rgba(17,20,28,0.6); border: 1px solid #2a3045; border-radius: 8px; padding: 10px 12px; }
+  #overlay .stats .go-chip { display: inline-block; background: #1f2940; border: 1px solid #3a4a6a; border-radius: 4px; padding: 2px 8px; font-size: 11px; color: #ffd47a; margin: 3px 4px 0 0; }
   #overlay button { padding: 14px 32px; font-size: 16px; font-weight: 700; background: #2b6f4a; border: none; color: white; border-radius: 8px; cursor: pointer; letter-spacing: 0.04em; }
   #overlay .tip { font-size: 12px; color: #6a7290; margin-top: 14px; max-width: 320px; text-align: center; }
   #design-toggle { position: fixed; top: 8px; right: 8px; z-index: 100; background: #1a1f30; color: #aab; border: 1px solid #2a3045; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: inherit; }
@@ -395,6 +402,7 @@ function placeShape(shape, cc, cr) {
     state.grid[cell.r][cell.c] = { type: 'blocker', tower };
   }
   state.gold -= cost;
+  if (state.stats) { state.stats.goldSpent += cost; state.stats.towersBuilt += 1; }
   recomputePath();
   state.selectedCell = null;
   syncHUD();
@@ -510,6 +518,18 @@ function newState() {
     bossName: '',
     gameTime: 0,
     speedMul: 2,
+    stats: {
+      startedAt: performance.now(),
+      kills: { standard: 0, fast: 0, armored: 0, swarm: 0, boss: 0 },
+      leaks: 0,
+      bossLeaks: 0,
+      totalDmgDealt: 0,
+      goldEarned: 0,
+      goldSpent: 0,
+      towersBuilt: 0,
+      towersSold: 0,
+      cardsTaken: {}, // id -> count
+    },
   };
 }
 
@@ -587,6 +607,7 @@ function sellSelected() {
   const tower = towerFromCell(sel);
   if (!tower) return;
   state.gold += Math.floor(tower.invested * (BAL.sellBackPct / 100));
+  if (state.stats) state.stats.towersSold += 1;
   for (const cell of (tower.cells || [{ c: tower.c, r: tower.r }])) {
     state.grid[cell.r][cell.c] = null;
   }
@@ -700,6 +721,7 @@ function pickCard(card) {
   if (!tower) return;
   applyCardTo(card, tower);
   tower.cardLevels[card.id] = (tower.cardLevels[card.id] || 0) + 1;
+  if (state.stats) state.stats.cardsTaken[card.id] = (state.stats.cardsTaken[card.id] || 0) + 1;
   tower.pendingLevels = Math.max(0, tower.pendingLevels - 1);
   if (tower.pendingLevels <= 0) {
     tower.pendingLevelUp = false;
@@ -837,10 +859,16 @@ function damageCreep(cr, dmg, sourceTower, ignoreArmor, silent) {
   if (!silent) state.effects.push({ type:'dmg', x: cr.x, y: cr.y - 0.2, text: Math.ceil(eff), age: 0, life: 0.8 });
   const realDealt = Math.max(0, Math.min(eff, before));
   if (sourceTower) awardXp(sourceTower, realDealt);
+  if (state.stats) state.stats.totalDmgDealt += realDealt;
   if (cr.hp <= 0 && !cr.dead) {
     cr.dead = true;
     const goldGain = Math.floor(cr.bounty * (sourceTower ? sourceTower.goldMul : 1));
     state.gold += goldGain;
+    if (state.stats) {
+      state.stats.goldEarned += goldGain;
+      const k = state.stats.kills;
+      if (k[cr.type] != null) k[cr.type] += 1;
+    }
     state.effects.push({ type:'poof', x: cr.x, y: cr.y, age: 0, life: 0.4, color: cr.color });
     hudDirty = true;
   }
@@ -906,6 +934,7 @@ function update(dt) {
     if (Math.abs(cr.x - (EXIT.c + 0.5)) < 0.25 && Math.abs(cr.y - (EXIT.r + 0.5)) < 0.25) {
       cr.leaked = true;
       state.lives -= cr.boss ? 5 : 1;
+      if (state.stats) { state.stats.leaks += 1; if (cr.boss) state.stats.bossLeaks += 1; }
       hudDirty = true;
       if (state.lives <= 0) { gameOver(); return; }
     }
@@ -1353,17 +1382,74 @@ function gameOver() {
   state.phase = 'GAMEOVER';
   state.waveActive = false;
   hideTutorialTip();
+  if (autoPlay) toggleAutoPlay(); // auto-test stops on death so the screen can be inspected
   const o = document.getElementById('overlay');
   document.getElementById('ov-title').textContent = 'Overrun';
-  document.getElementById('ov-desc').textContent = 'The path ran out. Try a longer maze next time.';
-  document.getElementById('ov-stats').innerHTML = `
-    <div class="row">Waves cleared: <b>${state.wave - 1}</b></div>
-    <div class="row">Gold banked: <b>${state.gold}</b></div>
-    <div class="row">Path length: <b>${pathLength()} tiles</b></div>
-    <div class="row">Length bonus: <b>+${Math.round((lengthBonus()-1)*100)}%</b></div>
-  `;
-  document.getElementById('ov-btn').textContent = 'Again';
+  document.getElementById('ov-desc').textContent = 'The maze ran out. Stats below — tune balance, then Restart.';
+  document.getElementById('ov-stats').innerHTML = renderGameOverStats();
+  document.getElementById('ov-btn').textContent = 'Restart';
   o.classList.add('show');
+}
+
+function renderGameOverStats() {
+  const s = state.stats || {};
+  const elapsedSec = Math.max(1, ((performance.now() - (s.startedAt || performance.now())) / 1000) | 0);
+  const mm = Math.floor(elapsedSec / 60), ss = (elapsedSec % 60).toString().padStart(2,'0');
+  // Surviving towers
+  const towers = [];
+  const seen = new Set();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const t = state.grid[r][c];
+    if (!t) continue;
+    const tower = t.type === 'tower' ? t : (t.type === 'blocker' ? t.tower : null);
+    if (tower && !seen.has(tower)) { seen.add(tower); towers.push(tower); }
+  }
+  const totalLvl = towers.reduce((a,t)=>a+t.level, 0);
+  const maxLvl = towers.length ? Math.max(...towers.map(t=>t.level)) : 0;
+  const avgLvl = towers.length ? (totalLvl / towers.length).toFixed(1) : '0';
+  const totalCells = towers.reduce((a,t)=>a+(t.cells?t.cells.length:1), 0);
+  // Kills
+  const k = s.kills || {};
+  const totalKills = (k.standard||0)+(k.fast||0)+(k.armored||0)+(k.swarm||0)+(k.boss||0);
+  // Cards taken
+  const cardLines = Object.entries(s.cardsTaken || {})
+    .sort((a,b)=>b[1]-a[1])
+    .map(([id,n])=>{ const card = CARDS.find(c=>c.id===id); return (card?card.emoji+' '+card.name:id) + ' ×' + n; });
+  return `
+    <div class="go-grid">
+      <div class="go-col">
+        <div class="go-hd">Run</div>
+        <div class="go-row">Waves cleared: <b>${state.wave - 1}</b></div>
+        <div class="go-row">Time: <b>${mm}:${ss}</b></div>
+        <div class="go-row">Speed: <b>${state.speedMul}×</b></div>
+        <div class="go-row">Leaks: <b>${s.leaks||0}</b>${s.bossLeaks?' (boss '+s.bossLeaks+')':''}</div>
+        <div class="go-row">Path length: <b>${pathLength()}</b> tiles · bonus <b>+${Math.round((lengthBonus()-1)*100)}%</b></div>
+      </div>
+      <div class="go-col">
+        <div class="go-hd">Economy</div>
+        <div class="go-row">Gold earned: <b>${s.goldEarned||0}</b></div>
+        <div class="go-row">Gold spent: <b>${s.goldSpent||0}</b></div>
+        <div class="go-row">Gold banked: <b>${state.gold}</b></div>
+        <div class="go-row">Towers built: <b>${s.towersBuilt||0}</b> · sold <b>${s.towersSold||0}</b></div>
+        <div class="go-row">Total damage: <b>${Math.round(s.totalDmgDealt||0).toLocaleString()}</b></div>
+      </div>
+      <div class="go-col">
+        <div class="go-hd">Kills (${totalKills.toLocaleString()})</div>
+        <div class="go-row">Standard: <b>${k.standard||0}</b></div>
+        <div class="go-row">Fast: <b>${k.fast||0}</b></div>
+        <div class="go-row">Armored: <b>${k.armored||0}</b></div>
+        <div class="go-row">Swarm: <b>${k.swarm||0}</b></div>
+        <div class="go-row">Boss: <b>${k.boss||0}</b></div>
+      </div>
+      <div class="go-col">
+        <div class="go-hd">Towers (${towers.length})</div>
+        <div class="go-row">Cells placed: <b>${totalCells}</b></div>
+        <div class="go-row">Avg level: <b>${avgLvl}</b></div>
+        <div class="go-row">Max level: <b>${maxLvl}</b></div>
+      </div>
+    </div>
+    ${cardLines.length ? '<div class="go-cards"><div class="go-hd">Cards taken</div>' + cardLines.map(s=>'<span class="go-chip">'+s+'</span>').join('') + '</div>' : ''}
+  `;
 }
 
 function startGame() {
@@ -1583,9 +1669,11 @@ function autoBuild() {
 
 function autoTick() {
   if (state.phase === 'GAMEOVER') {
+    // gameOver() already turned auto-play off so the user can inspect the
+    // game-over screen; record the run, then bail out without restarting.
     autoStats.games += 1;
     autoStats.bestWave = Math.max(autoStats.bestWave, state.wave - 1);
-    startGame();
+    updateAutoStatsUI();
     return;
   }
   if (state.phase !== 'PLAYING') return;
