@@ -49,13 +49,11 @@
   #tower-info.empty .ti-empty { display: block; }
   #ti-name { font-weight: 700; color: #7ee0ff; font-size: 13px; margin-bottom: 2px; }
   #ti-stats { font-size: 11px; color: #aab; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #ti-xp-bar { width: 100%; height: 6px; background: #1a1f30; border-radius: 3px; overflow: hidden; margin-bottom: 2px; }
-  #ti-xp-fill { height: 100%; background: linear-gradient(90deg, #2b6f4a, #7ee0ff); width: 0%; transition: width 0.2s; }
-  #ti-xp-text { font-size: 10px; color: #6a7290; margin-bottom: 6px; }
+  .upg-btn.upgrade-btn { background: #1d3424; border: 1px solid #2b6f4a; color: #cdf0d9; }
+  .upg-btn.upgrade-btn .cost { color: #ffd47a; margin-left: 6px; }
+  .upg-btn.upgrade-btn.disabled, .upg-btn.upgrade-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   #ti-upgrades { display: grid; grid-template-columns: 1fr; gap: 6px; }
   .upg-btn { background: #1f2940; border: 1px solid #2a5a8a; color: #e6ebff; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 11px; text-align: center; font-family: inherit; }
-  .upg-btn.level-ready { background: #3a3010; border: 1px solid #ffd47a; color: #ffe7a8; animation: pulseGlow 1.2s ease-in-out infinite; }
-  @keyframes pulseGlow { 0%, 100% { box-shadow: 0 0 0 rgba(255,212,122,0.0); } 50% { box-shadow: 0 0 14px rgba(255,212,122,0.6); } }
   .upg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .upg-btn .label { font-weight: 700; font-size: 12px; }
   .upg-btn .branch { color: #aab; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -80,8 +78,13 @@
   .cm-card-emoji { font-size: 44px; line-height: 1; margin-bottom: 6px; }
   .cm-card-name { font-size: 17px; font-weight: 700; color: #ffd47a; margin-bottom: 10px; }
   .cm-card-lvl { display: inline-block; margin-left: 6px; font-size: 11px; color: #aab; font-weight: 500; vertical-align: middle; }
-  .cm-card-desc { font-size: 13px; color: #cdd5ee; line-height: 1.45; }
+  .cm-card-desc { font-size: 13px; color: #cdd5ee; line-height: 1.45; flex: 1; }
+  .cm-card-cost { font-size: 14px; font-weight: 700; color: #ffd47a; margin-top: 8px; }
+  .cm-card.poor { opacity: 0.45; cursor: not-allowed; }
   .cm-empty { color: #aab; font-size: 14px; }
+  #cm-cancel { margin-top: 18px; background: #2a3045; border: none; color: #cdd5ee; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 13px; }
+  #cm-cancel:hover { background: #3a4055; color: #fff; }
+  #cm-cost-hint { color: #ffd47a; }
   .action-btn { background: #2a3045; border: none; color: #e6ebff; padding: 12px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 700; }
   .action-btn.primary { background: #2b6f4a; }
   .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -159,14 +162,15 @@
   </div>
 </div>
 <div id="card-modal">
-  <div id="cm-title">Tower Level <span id="cm-level">2</span></div>
-  <div id="cm-subtitle">Choose 1 of 3 cards<span id="cm-remaining"></span></div>
+  <div id="cm-title">Upgrade Tower<span id="cm-level"></span></div>
+  <div id="cm-subtitle">Pick 1 of 3 cards · <span id="cm-remaining"></span><span id="cm-cost-hint">50g each</span></div>
   <div id="cm-current">
     <div id="cm-current-stats"></div>
     <div id="cm-current-cards"></div>
     <div id="cm-slots"></div>
   </div>
   <div id="cm-cards"></div>
+  <button id="cm-cancel">Cancel</button>
 </div>
 <div id="app">
   <div id="hud">
@@ -193,8 +197,6 @@
       <div class="ti-content">
         <div id="ti-name">—</div>
         <div id="ti-stats">—</div>
-        <div id="ti-xp-bar"><div id="ti-xp-fill"></div></div>
-        <div id="ti-xp-text">XP 0 / 0</div>
         <div id="ti-upgrades"></div>
       </div>
       <div class="ti-empty">Tap a tower to inspect &amp; upgrade it</div>
@@ -291,12 +293,11 @@ const CARDS = [
     applyStack:t=>{ t.crit = Math.min(1.0, t.crit + 0.10); t.critMul += 0.25; } },
   { id:'multi',     emoji:'🏹', name:'Multishot',    weight:6,  canOffer:t=>true, descIntro:'+1 projectile per shot',    applyIntro:t=>{ t.multishot += 1; } },
   // rare / late
-  { id:'exec',      emoji:'💀', name:'Executioner',  weight:4,  canOffer:t=>t.level >= 4,
+  { id:'exec',      emoji:'💀', name:'Executioner',  weight:4,  canOffer:t=>Object.keys(t.cardLevels).length >= 2,
     descIntro:'Instakill non-boss below 18% HP',
     descStack:'+5% execute threshold',
     applyIntro:t=>{ t.execute = 0.18; },
     applyStack:t=>{ t.execute = Math.min(0.5, t.execute + 0.05); } },
-  { id:'scholar',   emoji:'📚', name:'Scholar',      weight:5,  canOffer:t=>true, descIntro:'+50% XP gained',             applyIntro:t=>{ t.xpMul *= 1.5; } },
   { id:'greed',     emoji:'💰', name:'Greed',        weight:4,  canOffer:t=>true, descIntro:'+40% gold from kills',       applyIntro:t=>{ t.goldMul *= 1.4; } },
 ];
 
@@ -322,14 +323,14 @@ function newTowerInstance(c, r) {
     burn: 0, burnDur: 0,
     execute: 0, crit: 0, critMul: 1,
     multishot: 1,
-    xpMul: 1, goldMul: 1,
-    level: 1, xp: 0, xpToNext: xpNeededAt(1),
-    pendingLevels: 0, pendingLevelUp: false,
+    goldMul: 1,
     cardLevels: {},
   };
 }
 
-function xpNeededAt(level) { return Math.ceil(100 * Math.pow(2.1, level - 1)); }
+// Each card pick costs gold (no XP system). Each click of "Upgrade" draws a
+// fresh 1-of-3 from the eligible pool.
+const UPGRADE_COST = 50;
 
 // === TOWER SHAPES ===
 // Polyominoes built around a center (cells include [0,0] which fires).
@@ -617,19 +618,7 @@ function sellSelected() {
   syncHUD();
 }
 
-// === XP / LEVEL UP / CARDS ===
-function awardXp(tower, amount) {
-  if (!tower || amount <= 0) return;
-  tower.xp += amount * tower.xpMul;
-  while (tower.xp >= tower.xpToNext) {
-    tower.xp -= tower.xpToNext;
-    tower.level += 1;
-    tower.xpToNext = xpNeededAt(tower.level);
-    tower.pendingLevels += 1;
-    tower.pendingLevelUp = true;
-  }
-}
-
+// === CARDS / UPGRADES ===
 function drawCards(tower, n) {
   const ownedCount = Object.keys(tower.cardLevels).length;
   const slotsFull = ownedCount >= towerSlotLimit(tower);
@@ -655,23 +644,21 @@ function drawCards(tower, n) {
   return drawn;
 }
 
+// Open the upgrade draft for a tower. Cards drawn fresh on every open.
 function openCardModal(tower) {
-  if (!tower || !tower.pendingLevelUp) return;
+  if (!tower) return;
+  if (state.waveActive) { setMsg('Upgrade between waves.'); return; }
   const opts = drawCards(tower, 3);
   if (opts.length === 0) {
-    tower.pendingLevels = 0;
-    tower.pendingLevelUp = false;
-    setMsg('No new cards available for this tower.');
-    syncHUD();
+    setMsg('No more cards available for this tower.');
     return;
   }
   state.modalTower = tower;
   state.modalCards = opts;
   const wrap = document.getElementById('cm-cards');
   wrap.innerHTML = '';
-  document.getElementById('cm-level').textContent = tower.level;
-  document.getElementById('cm-remaining').textContent = tower.pendingLevels > 1 ? ' · ' + tower.pendingLevels + ' level-ups queued' : '';
-  // Current build: stats + owned cards
+  document.getElementById('cm-level').textContent = '';
+  document.getElementById('cm-remaining').textContent = '';
   document.getElementById('cm-current-stats').textContent = towerStatParts(tower).join(' · ');
   const ownedWrap = document.getElementById('cm-current-cards');
   ownedWrap.innerHTML = '';
@@ -689,13 +676,12 @@ function openCardModal(tower) {
       ownedWrap.appendChild(chip);
     }
   }
-  // Slot indicator: "2/3 slots used"
   const slotInfo = document.getElementById('cm-slots');
   if (slotInfo) {
     const used = Object.keys(tower.cardLevels).length;
     const limit = towerSlotLimit(tower);
-    slotInfo.textContent = used + ' / ' + limit + ' card slots used' +
-      (used >= limit ? ' · only restacks of these cards' : '');
+    slotInfo.textContent = used + ' / ' + limit + ' card slots used · each pick costs ' + UPGRADE_COST + 'g' +
+      (used >= limit ? ' · only restacks available' : '');
   }
   for (const card of opts) {
     const lvl = tower.cardLevels[card.id] || 0;
@@ -706,10 +692,14 @@ function openCardModal(tower) {
     const desc = cardDescFor(card, tower);
     const btn = document.createElement('button');
     btn.className = 'cm-card' + (isStack ? ' cm-card-stack' : ' cm-card-new');
+    const tooPoor = state.gold < UPGRADE_COST;
+    if (tooPoor) btn.classList.add('poor');
+    btn.disabled = tooPoor;
     btn.innerHTML =
       '<div class="cm-card-emoji">' + card.emoji + '</div>' +
       '<div class="cm-card-name">' + headline + '</div>' +
-      '<div class="cm-card-desc">' + desc + '</div>';
+      '<div class="cm-card-desc">' + desc + '</div>' +
+      '<div class="cm-card-cost">' + UPGRADE_COST + 'g</div>';
     btn.onclick = () => pickCard(card);
     wrap.appendChild(btn);
   }
@@ -719,16 +709,13 @@ function openCardModal(tower) {
 function pickCard(card) {
   const tower = state.modalTower;
   if (!tower) return;
+  if (state.gold < UPGRADE_COST) { setMsg('Not enough gold.'); return; }
+  state.gold -= UPGRADE_COST;
+  if (state.stats) state.stats.goldSpent += UPGRADE_COST;
   applyCardTo(card, tower);
   tower.cardLevels[card.id] = (tower.cardLevels[card.id] || 0) + 1;
   if (state.stats) state.stats.cardsTaken[card.id] = (state.stats.cardsTaken[card.id] || 0) + 1;
-  tower.pendingLevels = Math.max(0, tower.pendingLevels - 1);
-  if (tower.pendingLevels <= 0) {
-    tower.pendingLevelUp = false;
-    closeCardModal();
-  } else {
-    openCardModal(tower);
-  }
+  closeCardModal();
   syncHUD();
 }
 
@@ -858,7 +845,6 @@ function damageCreep(cr, dmg, sourceTower, ignoreArmor, silent) {
   cr.hitFlash = 0.1;
   if (!silent) state.effects.push({ type:'dmg', x: cr.x, y: cr.y - 0.2, text: Math.ceil(eff), age: 0, life: 0.8 });
   const realDealt = Math.max(0, Math.min(eff, before));
-  if (sourceTower) awardXp(sourceTower, realDealt);
   if (state.stats) state.stats.totalDmgDealt += realDealt;
   if (cr.hp <= 0 && !cr.dead) {
     cr.dead = true;
@@ -1108,7 +1094,6 @@ function draw() {
   // slot-limit-equals-cell-count rule. Walks the grid but dedupes by tower
   // identity so each multi-cell tower is drawn once.
   // Pulse runs on wall-clock so it doesn't speed up at high game-speed.
-  const pulseT = performance.now() / 250;
   // Trace only the external edges of a tower's polyomino footprint with the
   // current strokeStyle/lineWidth. Used for per-tower outlines, pending glow,
   // and selection highlight - so cells of the same tower don't draw seams.
@@ -1165,27 +1150,11 @@ function draw() {
         ctx.globalAlpha = 1;
       }
     }
-    // Level number on the center tile (top-left)
-    if (tower.level > 1) {
-      const ls = Math.max(9, Math.floor(cell * 0.26));
-      ctx.font = 'bold ' + ls + 'px ui-sans-serif, system-ui, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = '#ffd47a';
-      ctx.fillText(String(tower.level), tower.c*cell + 3, tower.r*cell + 2);
-    }
     // Per-tower colored outline (traces only external edges of the footprint
     // so cells of the same tower don't draw seams between them).
     ctx.strokeStyle = tower.tint || '#7ee0ff';
     ctx.lineWidth = 2;
     strokeFootprint(cells, 1);
-    // Pending level-up: pulsing yellow overlay on the same external edges.
-    if (tower.pendingLevelUp) {
-      const a = 0.5 + 0.5 * Math.sin(pulseT);
-      ctx.strokeStyle = 'rgba(255,228,120,' + a.toFixed(2) + ')';
-      ctx.lineWidth = 3;
-      strokeFootprint(cells, 1);
-    }
     // Selection: white outline around the whole footprint + range circle.
     if (state.selectedCell && state.selectedCell.c === tower.c && state.selectedCell.r === tower.r) {
       ctx.strokeStyle = '#fff';
@@ -1339,24 +1308,20 @@ function refreshTowerInfo(sel) {
   const ti = document.getElementById('tower-info');
   if (!sel) { ti.classList.add('empty'); return; }
   ti.classList.remove('empty');
-  document.getElementById('ti-name').textContent = 'Tower · Lv ' + sel.level;
+  const ownedCount = Object.keys(sel.cardLevels).length;
+  const limit = towerSlotLimit(sel);
+  document.getElementById('ti-name').textContent = 'Tower · ' + ownedCount + '/' + limit + ' cards';
   document.getElementById('ti-stats').textContent = towerStatParts(sel).join(' · ');
-  // XP bar
-  const xpFill = document.getElementById('ti-xp-fill');
-  const xpPct = Math.min(100, 100 * sel.xp / sel.xpToNext);
-  xpFill.style.width = xpPct + '%';
-  document.getElementById('ti-xp-text').textContent = 'XP ' + Math.floor(sel.xp) + ' / ' + sel.xpToNext;
-  // Upgrade area: pending level-up button OR card history
   const wrap = document.getElementById('ti-upgrades');
   wrap.innerHTML = '';
-  if (sel.pendingLevelUp) {
-    const b = document.createElement('button');
-    b.className = 'upg-btn level-ready';
-    b.innerHTML = '<div class="label">★ Level Up — Choose a card' +
-      (sel.pendingLevels > 1 ? ' (' + sel.pendingLevels + ' queued)' : '') + '</div>';
-    b.onclick = () => openCardModal(sel);
-    wrap.appendChild(b);
-  } else if (Object.keys(sel.cardLevels).length > 0) {
+  const canAfford = state.gold >= UPGRADE_COST;
+  const b = document.createElement('button');
+  b.className = 'upg-btn upgrade-btn' + (canAfford && !state.waveActive ? '' : ' disabled');
+  b.disabled = !canAfford || state.waveActive;
+  b.innerHTML = '<div class="label">★ Upgrade — pick 1 of 3 cards <span class="cost">' + UPGRADE_COST + 'g</span></div>';
+  b.onclick = () => openCardModal(sel);
+  wrap.appendChild(b);
+  if (ownedCount > 0) {
     const m = document.createElement('div');
     m.className = 'ti-maxed';
     m.textContent = 'Cards: ' + towerCardSummary(sel).join(', ');
@@ -1411,9 +1376,11 @@ function renderGameOverStats() {
     const tower = t.type === 'tower' ? t : (t.type === 'blocker' ? t.tower : null);
     if (tower && !seen.has(tower)) { seen.add(tower); towers.push(tower); }
   }
-  const totalLvl = towers.reduce((a,t)=>a+t.level, 0);
-  const maxLvl = towers.length ? Math.max(...towers.map(t=>t.level)) : 0;
-  const avgLvl = towers.length ? (totalLvl / towers.length).toFixed(1) : '0';
+  // Card count per tower as a proxy for upgrade depth (was levels, removed with XP system).
+  const cardCounts = towers.map(t => Object.values(t.cardLevels || {}).reduce((a,b)=>a+b,0));
+  const totalCards = cardCounts.reduce((a,b)=>a+b,0);
+  const avgCards = towers.length ? (totalCards / towers.length).toFixed(1) : '0';
+  const maxCards = cardCounts.length ? Math.max(...cardCounts) : 0;
   const totalCells = towers.reduce((a,t)=>a+(t.cells?t.cells.length:1), 0);
   // Kills
   const k = s.kills || {};
@@ -1451,8 +1418,8 @@ function renderGameOverStats() {
       <div class="go-col">
         <div class="go-hd">Towers (${towers.length})</div>
         <div class="go-row">Cells placed: <b>${totalCells}</b></div>
-        <div class="go-row">Avg level: <b>${avgLvl}</b></div>
-        <div class="go-row">Max level: <b>${maxLvl}</b></div>
+        <div class="go-row">Avg cards/tower: <b>${avgCards}</b></div>
+        <div class="go-row">Most-upgraded: <b>${maxCards}</b> picks</div>
       </div>
     </div>
     ${cardLines.length ? '<div class="go-cards"><div class="go-hd">Cards taken</div>' + cardLines.map(s=>'<span class="go-chip">'+s+'</span>').join('') + '</div>' : ''}
@@ -1561,20 +1528,38 @@ function autoPickCard(opts, tower) {
 }
 
 // Resolve every pending level-up headlessly (no modal/pause).
-function autoResolveLevelUps() {
+// Spend gold on tower upgrades, distributing across towers (round-robin) so a
+// single tower can't gobble all of it. Leaves a 2-shape build reserve.
+function autoUpgrade() {
+  const towers = [];
+  const seen = new Set();
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     const t = state.grid[r][c];
-    if (!t || !t.pendingLevelUp) continue;
-    let guard = 0;
-    while (t.pendingLevels > 0 && guard++ < 100) {
+    if (!t || t.type !== 'tower' || seen.has(t)) continue;
+    seen.add(t);
+    towers.push(t);
+  }
+  if (!towers.length) return;
+  // Reserve enough gold to place ~2 fresh shapes next time.
+  const reserve = COST_PER_CELL * 4;
+  let safety = 100;
+  while (state.gold >= UPGRADE_COST + reserve && safety-- > 0) {
+    let bought = false;
+    for (const t of towers) {
+      if (state.gold < UPGRADE_COST + reserve) break;
       const opts = drawCards(t, 3);
-      if (!opts.length) { t.pendingLevels = 0; break; }
+      if (!opts.length) continue;
       const pick = autoPickCard(opts, t);
+      state.gold -= UPGRADE_COST;
+      if (state.stats) {
+        state.stats.goldSpent += UPGRADE_COST;
+        state.stats.cardsTaken[pick.id] = (state.stats.cardsTaken[pick.id] || 0) + 1;
+      }
       applyCardTo(pick, t);
       t.cardLevels[pick.id] = (t.cardLevels[pick.id] || 0) + 1;
-      t.pendingLevels -= 1;
+      bought = true;
     }
-    t.pendingLevelUp = t.pendingLevels > 0;
+    if (!bought) break; // no eligible towers left at all
   }
 }
 
@@ -1705,10 +1690,9 @@ function autoTick() {
   // Sit idle on the game-over screen so the user can analyze stats; resume on Restart.
   if (state.phase !== 'PLAYING') return;
   if (state.modalTower) closeCardModal(); // never use the modal in auto mode
-  autoResolveLevelUps();
   if (!state.waveActive) {
     autoBuild();
-    autoResolveLevelUps();
+    autoUpgrade();
     startWave();
   }
   hudDirty = true;
@@ -1718,14 +1702,18 @@ function updateAutoStatsUI() {
   const el = document.getElementById('dp-auto-stats');
   if (!el) return;
   if (!autoPlay) { el.textContent = ''; return; }
-  const lvls = [];
+  let towerCount = 0, maxCards = 0;
+  const seen = new Set();
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     const t = state.grid[r][c];
-    if (t) lvls.push(t.level);
+    if (!t || t.type !== 'tower' || seen.has(t)) continue;
+    seen.add(t);
+    towerCount += 1;
+    const cards = Object.values(t.cardLevels || {}).reduce((a,b)=>a+b,0);
+    if (cards > maxCards) maxCards = cards;
   }
-  const maxLvl = lvls.length ? Math.max(...lvls) : 0;
   el.textContent = 'Games: ' + autoStats.games + ' · best wave ' + autoStats.bestWave +
-    ' · towers ' + lvls.length + ' · max Lv ' + maxLvl;
+    ' · towers ' + towerCount + ' · max picks ' + maxCards;
 }
 
 function toggleAutoPlay() {
@@ -1782,7 +1770,6 @@ function onTap(e) {
     state.selectedCell = tower ? { c: tower.c, r: tower.r } : null;
     state.armedShape = null;
     syncHUD();
-    if (tower && tower.pendingLevelUp) openCardModal(tower);
     return;
   }
   // Empty cell: try to place the armed shape from the draft.
@@ -1820,7 +1807,15 @@ window.addEventListener('DOMContentLoaded', () => {
   };
   document.getElementById('dp-apply').onclick = applyDesignPanel;
   document.getElementById('dp-reset').onclick = resetDesignPanel;
-  document.getElementById('dp-auto').onclick = toggleAutoPlay;
+  document.getElementById('dp-auto').onclick = () => {
+    toggleAutoPlay();
+    document.getElementById('design-panel').classList.remove('show'); // get the panel out of the way
+  };
+  // Cancel + backdrop click both close the modal without buying.
+  document.getElementById('cm-cancel').onclick = closeCardModal;
+  document.getElementById('card-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'card-modal') closeCardModal();
+  });
   syncDesignPanelInputs();
 
   let last = performance.now();
