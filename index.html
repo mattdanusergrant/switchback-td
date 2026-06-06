@@ -1583,7 +1583,9 @@ function autoUpgrade() {
   // Highest coverage first; tiebreak by closer-to-entry (creeps eat damage sooner).
   entries.sort((a, b) => b.cov - a.cov || a.tower.r - b.tower.r);
   // Reserve enough gold to keep building reasonably between waves.
-  const reserve = COST_PER_CELL * 4;
+  // Smaller build-side reserve - just one Pellet's worth - so most gold flows
+  // into upgrades, which multiply damage on every existing tower.
+  const reserve = COST_PER_CELL;
   // First pass: top 40% of towers get priority - concentrated DPS beats spread.
   const focusN = Math.max(1, Math.ceil(entries.length * 0.4));
   let safety = 200;
@@ -1672,21 +1674,36 @@ function autoBestSpot() {
 // Looks across ALL three draft shapes each iteration (so cheap shapes win when
 // they offer the best value) and only considers anchors near the current path.
 // Build phase: pick the shape+anchor that maximizes path-gain plus coverage of
-// the NEW path. Coverage = how many path tiles the firing center can shoot at
-// the BASIC tower range; dense shapes that bend the path through their own
-// firing arc score highest.
-const MIN_PLACEMENT_SCORE = 6;
+// the NEW path. Path extension is weighted 2-3x coverage because every extra
+// path tile is a shot for EVERY tower (multiplicative across the maze) while
+// coverage is local to one tower. Tower count is capped by wave so the AI
+// stops dumping gold on placements and starts feeding upgrades.
 function autoBuild() {
   autoSellDeadweight();
+  // Count existing towers so we know how many more we want.
+  let towerCount = 0;
+  const seenT = new Set();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const t = state.grid[r][c];
+    if (t && t.type === 'tower' && !seenT.has(t)) { seenT.add(t); towerCount++; }
+  }
+  // Target: 4 to start, +1 every 3 waves. Capped so upgrades get attention.
+  const targetTowers = 4 + Math.floor((state.wave || 0) / 3);
+  if (towerCount >= targetTowers) return;
+  const maxPlace = targetTowers - towerCount;
+  // Reserve gold so the upgrade phase has runway. Scales with how many towers
+  // need feeding (capped to 40% of current gold so we still build sometimes).
+  const upgradeReserve = towerCount > 0
+    ? Math.min(state.gold * 0.4, towerCount * UPGRADE_COST)
+    : 0;
+
   let placed = 0, stuck = 0;
-  while (placed < 16 && stuck < 4) {
+  while (placed < maxPlace && stuck < 4) {
     const minShapeCost = state.shapeDraft.reduce((m, s) => Math.min(m, shapeCost(s)), Infinity);
-    if (state.gold < minShapeCost) break;
+    if (state.gold < minShapeCost + upgradeReserve) break;
 
     const currentPath = state.path || [];
     const currentLen = currentPath.length - 1;
-    // Candidate anchors: empty cells within 2 tiles of the path. Drop to all-empty
-    // if the path got crowded out (rare after rocks).
     const seen = new Set();
     const candidates = [];
     for (const p of currentPath) {
@@ -1710,31 +1727,27 @@ function autoBuild() {
     for (let i = 0; i < state.shapeDraft.length; i++) {
       const shape = state.shapeDraft[i];
       const cost = shapeCost(shape);
-      if (state.gold < cost) continue;
+      if (state.gold < cost + upgradeReserve) continue;
       for (const cand of candidates) {
         const fit = shapeFitsAt(shape, cand.c, cand.r);
         if (!fit) continue;
-        // Probe the placement: how does it change the path?
         for (const cl of fit) state.grid[cl.r][cl.c] = { type: '_probe_' };
         const p = findPathOn(state.grid);
         for (const cl of fit) state.grid[cl.r][cl.c] = null;
         if (!p) continue;
         const newLen = p.length - 1;
         const pathGain = Math.max(0, newLen - currentLen);
-        // Firing center is cand (== fit[0]). How many tiles of the NEW path
-        // can it shoot? Coverage = direct DPS contribution.
         const coverage = autoCoverageOf(cand.c, cand.r, BASIC_TOWER.range, p);
-        // Tiny tiebreak: prefer placements closer to entry (more shots per creep).
         const proximity = (ROWS - cand.r) * 0.04;
-        // Absolute score with small cost penalty - dense shapes beat pellets
-        // when they actually extend the path.
-        const score = pathGain * 4 + coverage * 5 + proximity - cost * 0.08;
+        // Path extension weighted 8x (every tile = a shot for every tower);
+        // coverage weighted 3x (direct DPS, but local to this tower).
+        const score = pathGain * 8 + coverage * 3 + proximity - cost * 0.06;
         if (!bestPick || score > bestPick.score) {
           bestPick = { idx: i, shape, spot: cand, score, coverage };
         }
       }
     }
-    if (!bestPick || bestPick.score < MIN_PLACEMENT_SCORE) { stuck += 1; break; }
+    if (!bestPick) { stuck += 1; break; }
     if (!placeShape(bestPick.shape, bestPick.spot.c, bestPick.spot.r)) { stuck += 1; continue; }
     state.shapeDraft[bestPick.idx] = randomShape();
     placed += 1;
@@ -1746,6 +1759,10 @@ function autoTick() {
   if (state.phase !== 'PLAYING') return;
   if (state.modalTower) closeCardModal(); // never use the modal in auto mode
   if (!state.waveActive) {
+    // Upgrade-first: existing towers are proven assets, multiply their damage
+    // before adding new bodies. autoBuild has its own gold reserve so this
+    // doesn't starve placements. Final pass picks up any leftover after build.
+    autoUpgrade();
     autoBuild();
     autoUpgrade();
     startWave();
