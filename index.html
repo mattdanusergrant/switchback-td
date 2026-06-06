@@ -1382,7 +1382,14 @@ function gameOver() {
   state.phase = 'GAMEOVER';
   state.waveActive = false;
   hideTutorialTip();
-  if (autoPlay) toggleAutoPlay(); // auto-test stops on death so the screen can be inspected
+  // If auto-play is on, record this run in the session counters. Don't toggle
+  // auto-play off - the autoTick loop will sit idle on GAMEOVER, holding the
+  // stats screen until the user clicks Restart, then resume on the new game.
+  if (autoPlay) {
+    autoStats.games += 1;
+    autoStats.bestWave = Math.max(autoStats.bestWave, state.wave - 1);
+    updateAutoStatsUI();
+  }
   const o = document.getElementById('overlay');
   document.getElementById('ov-title').textContent = 'Overrun';
   document.getElementById('ov-desc').textContent = 'The maze ran out. Stats below — tune balance, then Restart.';
@@ -1668,14 +1675,7 @@ function autoBuild() {
 }
 
 function autoTick() {
-  if (state.phase === 'GAMEOVER') {
-    // gameOver() already turned auto-play off so the user can inspect the
-    // game-over screen; record the run, then bail out without restarting.
-    autoStats.games += 1;
-    autoStats.bestWave = Math.max(autoStats.bestWave, state.wave - 1);
-    updateAutoStatsUI();
-    return;
-  }
+  // Sit idle on the game-over screen so the user can analyze stats; resume on Restart.
   if (state.phase !== 'PLAYING') return;
   if (state.modalTower) closeCardModal(); // never use the modal in auto mode
   autoResolveLevelUps();
