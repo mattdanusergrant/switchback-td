@@ -1514,52 +1514,100 @@ function resetDesignPanel() {
 // === AUTO-TEST AI ===
 // Picks the highest-priority offered card. Favors offense so a "competent" build
 // is produced — good for surfacing whether damage keeps pace with wave scaling.
-const CARD_PRIORITY = { brutal:9, sharp:8, crit:8, splash:7, chain:7, burn:7, exec:7, quick:6, multi:6, frost:5, longbarrel:4, eagleeye:4, scholar:3, greed:3 };
+// Card priority: tuned around the new gold-cost system.
+// Pure stat boosters (sharp/quick) stack with no downside, so they're worth more
+// than they look. Splash + Multishot is a top combo, so both rate high.
+// Brutal slows fire rate every stack which hurts DPS less than expected after the
+// stacking nerf, but still ranks below sharp. Frost is mostly defensive => low.
+const CARD_PRIORITY = { sharp:10, splash:9, quick:8, multi:8, brutal:7, crit:7, chain:7, exec:7, burn:6, longbarrel:5, greed:4, frost:3, eagleeye:3 };
 function autoPickCard(opts, tower) {
   let best = opts[0], bestP = -Infinity;
   for (const c of opts) {
     const owned = tower && tower.cardLevels ? (tower.cardLevels[c.id] || 0) : 0;
-    // Stacking what the tower already has = specialization. Strongly preferred.
-    const stackBonus = owned > 0 ? 3.0 : 0;
-    const p = (CARD_PRIORITY[c.id] || 1) + stackBonus + Math.random() * 0.4;
+    // Strong specialization bonus so an established tower stacks one mechanic deep.
+    const stackBonus = owned > 0 ? 4.0 : 0;
+    // Penalize a third Brutal/EagleEye stack (compound fire-rate penalty hurts).
+    const rateHit = ((c.id === 'brutal' || c.id === 'eagleeye') && owned >= 2) ? -3.0 : 0;
+    const p = (CARD_PRIORITY[c.id] || 1) + stackBonus + rateHit + Math.random() * 0.3;
     if (p > bestP) { bestP = p; best = c; }
   }
   return best;
 }
 
-// Resolve every pending level-up headlessly (no modal/pause).
-// Spend gold on tower upgrades, distributing across towers (round-robin) so a
-// single tower can't gobble all of it. Leaves a 2-shape build reserve.
-function autoUpgrade() {
-  const towers = [];
+// Count path tiles a tower at (c,r) with given range can shoot at.
+function autoCoverageOf(c, r, range, path) {
+  let n = 0;
+  for (const p of (path || state.path || [])) {
+    const d = Math.hypot(p.c + 0.5 - (c + 0.5), p.r + 0.5 - (r + 0.5));
+    if (d <= range) n++;
+  }
+  return n;
+}
+
+// Refund towers whose firing center can no longer shoot any path tile - but
+// only if they have no cards (preserve player investment in upgraded ones).
+function autoSellDeadweight() {
+  const path = state.path || [];
+  const toSell = [];
   const seen = new Set();
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     const t = state.grid[r][c];
     if (!t || t.type !== 'tower' || seen.has(t)) continue;
     seen.add(t);
-    towers.push(t);
+    if (Object.keys(t.cardLevels).length > 0) continue; // never sell upgraded towers
+    if (autoCoverageOf(t.c, t.r, t.range, path) === 0) toSell.push(t);
   }
-  if (!towers.length) return;
-  // Reserve enough gold to place ~2 fresh shapes next time.
+  for (const t of toSell) {
+    state.gold += Math.floor(t.invested * (BAL.sellBackPct / 100));
+    for (const cell of t.cells) state.grid[cell.r][cell.c] = null;
+  }
+  if (toSell.length) recomputePath();
+}
+
+// Upgrade phase: focus gold on the highest-coverage towers (most shots per wave).
+// Skip towers that can't shoot anything yet (probably about to be sold or already
+// orphaned by a path shift).
+function autoUpgrade() {
+  const entries = [];
+  const seen = new Set();
+  const path = state.path || [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const t = state.grid[r][c];
+    if (!t || t.type !== 'tower' || seen.has(t)) continue;
+    seen.add(t);
+    const cov = autoCoverageOf(t.c, t.r, t.range, path);
+    if (cov === 0) continue;
+    entries.push({ tower: t, cov });
+  }
+  if (!entries.length) return;
+  // Highest coverage first; tiebreak by closer-to-entry (creeps eat damage sooner).
+  entries.sort((a, b) => b.cov - a.cov || a.tower.r - b.tower.r);
+  // Reserve enough gold to keep building reasonably between waves.
   const reserve = COST_PER_CELL * 4;
-  let safety = 100;
-  while (state.gold >= UPGRADE_COST + reserve && safety-- > 0) {
-    let bought = false;
-    for (const t of towers) {
-      if (state.gold < UPGRADE_COST + reserve) break;
-      const opts = drawCards(t, 3);
-      if (!opts.length) continue;
-      const pick = autoPickCard(opts, t);
-      state.gold -= UPGRADE_COST;
-      if (state.stats) {
-        state.stats.goldSpent += UPGRADE_COST;
-        state.stats.cardsTaken[pick.id] = (state.stats.cardsTaken[pick.id] || 0) + 1;
+  // First pass: top 40% of towers get priority - concentrated DPS beats spread.
+  const focusN = Math.max(1, Math.ceil(entries.length * 0.4));
+  let safety = 200;
+  // Round-robin within the focused group until budget exhausted, then expand.
+  for (let group = 0; group < 2 && safety > 0; group++) {
+    const pool = entries.slice(0, group === 0 ? focusN : entries.length);
+    let bought = true;
+    while (bought && state.gold >= UPGRADE_COST + reserve && safety-- > 0) {
+      bought = false;
+      for (const { tower } of pool) {
+        if (state.gold < UPGRADE_COST + reserve) break;
+        const opts = drawCards(tower, 3);
+        if (!opts.length) continue;
+        const pick = autoPickCard(opts, tower);
+        state.gold -= UPGRADE_COST;
+        if (state.stats) {
+          state.stats.goldSpent += UPGRADE_COST;
+          state.stats.cardsTaken[pick.id] = (state.stats.cardsTaken[pick.id] || 0) + 1;
+        }
+        applyCardTo(pick, tower);
+        tower.cardLevels[pick.id] = (tower.cardLevels[pick.id] || 0) + 1;
+        bought = true;
       }
-      applyCardTo(pick, t);
-      t.cardLevels[pick.id] = (t.cardLevels[pick.id] || 0) + 1;
-      bought = true;
     }
-    if (!bought) break; // no eligible towers left at all
   }
 }
 
@@ -1623,16 +1671,25 @@ function autoBestSpot() {
 // Build phase: pick the shape+anchor with the best (path-gain + coverage) per gold.
 // Looks across ALL three draft shapes each iteration (so cheap shapes win when
 // they offer the best value) and only considers anchors near the current path.
+// Build phase: pick the shape+anchor that maximizes path-gain plus coverage of
+// the NEW path. Coverage = how many path tiles the firing center can shoot at
+// the BASIC tower range; dense shapes that bend the path through their own
+// firing arc score highest.
+const MIN_PLACEMENT_SCORE = 6;
 function autoBuild() {
+  autoSellDeadweight();
   let placed = 0, stuck = 0;
-  while (placed < 14 && stuck < 4) {
-    if (state.gold < COST_PER_CELL) break; // can't afford even a 1-cell tower
-    const path = state.path || [];
-    const pathSet = new Set(path.map(p => p.r + ',' + p.c));
-    // Candidate anchors: empty cells within 2 of the path. Drop to all-empty if none.
+  while (placed < 16 && stuck < 4) {
+    const minShapeCost = state.shapeDraft.reduce((m, s) => Math.min(m, shapeCost(s)), Infinity);
+    if (state.gold < minShapeCost) break;
+
+    const currentPath = state.path || [];
+    const currentLen = currentPath.length - 1;
+    // Candidate anchors: empty cells within 2 tiles of the path. Drop to all-empty
+    // if the path got crowded out (rare after rocks).
     const seen = new Set();
     const candidates = [];
-    for (const p of path) {
+    for (const p of currentPath) {
       for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
         const c = p.c + dc, r = p.r + dr;
         if (c < 0 || c >= COLS || r < 0 || r >= ROWS) continue;
@@ -1643,14 +1700,13 @@ function autoBuild() {
         candidates.push({ c, r });
       }
     }
-    if (candidates.length === 0) {
+    if (!candidates.length) {
       for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
         if (!state.grid[r][c]) candidates.push({ c, r });
       }
     }
-    const currentLen = pathLength();
 
-    let bestPick = null; // { idx, shape, spot, score }
+    let bestPick = null;
     for (let i = 0; i < state.shapeDraft.length; i++) {
       const shape = state.shapeDraft[i];
       const cost = shapeCost(shape);
@@ -1658,28 +1714,27 @@ function autoBuild() {
       for (const cand of candidates) {
         const fit = shapeFitsAt(shape, cand.c, cand.r);
         if (!fit) continue;
-        // How much does this placement extend the path? Probe by blocking and re-pathing.
+        // Probe the placement: how does it change the path?
         for (const cl of fit) state.grid[cl.r][cl.c] = { type: '_probe_' };
         const p = findPathOn(state.grid);
         for (const cl of fit) state.grid[cl.r][cl.c] = null;
-        if (!p) continue; // would seal (shouldn't happen since shapeFitsAt already checked, defensive)
+        if (!p) continue;
         const newLen = p.length - 1;
         const pathGain = Math.max(0, newLen - currentLen);
-        // Is the firing cell (center == fit[0]) next to the path? Towers do nothing if not.
-        let nearPath = 0;
-        for (const [dc, dr] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-          if (pathSet.has((cand.r + dr) + ',' + (cand.c + dc))) { nearPath = 1; break; }
-        }
-        // Tiny tiebreak: prefer placements toward the entry so creeps eat damage earlier.
-        const proximity = (ROWS - cand.r) * 0.05;
-        const raw = pathGain * 4 + nearPath * 6 + proximity + 1;
-        const score = raw / cost; // value per gold
+        // Firing center is cand (== fit[0]). How many tiles of the NEW path
+        // can it shoot? Coverage = direct DPS contribution.
+        const coverage = autoCoverageOf(cand.c, cand.r, BASIC_TOWER.range, p);
+        // Tiny tiebreak: prefer placements closer to entry (more shots per creep).
+        const proximity = (ROWS - cand.r) * 0.04;
+        // Absolute score with small cost penalty - dense shapes beat pellets
+        // when they actually extend the path.
+        const score = pathGain * 4 + coverage * 5 + proximity - cost * 0.08;
         if (!bestPick || score > bestPick.score) {
-          bestPick = { idx: i, shape, spot: cand, score };
+          bestPick = { idx: i, shape, spot: cand, score, coverage };
         }
       }
     }
-    if (!bestPick) { stuck += 1; continue; }
+    if (!bestPick || bestPick.score < MIN_PLACEMENT_SCORE) { stuck += 1; break; }
     if (!placeShape(bestPick.shape, bestPick.spot.c, bestPick.spot.r)) { stuck += 1; continue; }
     state.shapeDraft[bestPick.idx] = randomShape();
     placed += 1;
