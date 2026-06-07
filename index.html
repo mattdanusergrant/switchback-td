@@ -731,7 +731,7 @@ function makeWave(n) {
   const tut = BAL.tutorialEnabled && n <= TUTORIAL_WAVES;
   if (n % 10 === 0) {
     state.bossName = BOSS_NAMES[Math.floor(Math.random()*BOSS_NAMES.length)];
-    const bossHp = tut ? (1 + n*BAL.bossHpScale * BAL.tutorialHpScale * 0.5) : (1 + n*BAL.bossHpScale);
+    const bossHp = tut ? (1 + n*BAL.bossHpScale * BAL.tutorialHpScale * 0.32) : (1 + n*BAL.bossHpScale);
     q.push({ type:'boss', delay:0.5, hpMul: bossHp, bountyMul: 1 + (n/10) });
     const entourage = tut ? 2 : 6;
     const entHp = tut ? 1.0 : (1 + n*BAL.waveHpScale * 0.75);
@@ -1687,8 +1687,9 @@ function autoBuild() {
     const t = state.grid[r][c];
     if (t && t.type === 'tower' && !seenT.has(t)) { seenT.add(t); towerCount++; }
   }
-  // Target grows slowly: 4 at the start, +1 every 3 waves.
-  const targetTowers = 4 + Math.floor((state.wave || 0) / 3);
+  // Target grows slowly: 3 to start, +1 every 4 waves. Tight cap forces gold
+  // into upgrades instead of endless tower placement.
+  const targetTowers = 3 + Math.floor((state.wave || 0) / 4);
   if (towerCount >= targetTowers) return;
   const maxPlace = targetTowers - towerCount;
 
@@ -1784,7 +1785,9 @@ function updateAutoStatsUI() {
     const cards = Object.values(t.cardLevels || {}).reduce((a,b)=>a+b,0);
     if (cards > maxCards) maxCards = cards;
   }
-  el.textContent = 'Games: ' + autoStats.games + ' · best wave ' + autoStats.bestWave +
+  // AI-build tag bumps when build/upgrade logic changes - confirms the deployed
+  // JS isn't a stale cached version.
+  el.textContent = '[AIv3] Games: ' + autoStats.games + ' · best wave ' + autoStats.bestWave +
     ' · towers ' + towerCount + ' · max picks ' + maxCards;
 }
 
